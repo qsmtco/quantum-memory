@@ -1,0 +1,43 @@
+{
+  "id": "quantum-memory",
+  "name": "Quantum Memory",
+  "description": "Hybrid Memory System with DAG compaction, entity extraction, and auto-recall",
+  "kind": "context-engine",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "databasePath": {
+        "type": "string",
+        "default": "~/.openclaw/quantum.db",
+        "description": "Path to SQLite database"
+      },
+      "freshTailCount": {
+        "type": "number",
+        "default": 32,
+        "description": "Number of recent messages protected from compaction"
+      },
+      "contextThreshold": {
+        "type": "number",
+        "default": 0.75,
+        "description": "Fraction of context window that triggers compaction"
+      },
+      "leafChunkTokens": {
+        "type": "number",
+        "default": 20000,
+        "description": "Max source tokens per leaf summary"
+      },
+      "leafTargetTokens": {
+        "type": "number",
+        "default": 1200,
+        "description": "Target token count for leaf summaries"
+      },
+      "condensedTargetTokens": {
+        "type": "number",
+        "default": 2000,
+        "description": "Target token count for condensed summaries"
+      }
+    }
+  }
+}

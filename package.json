@@ -1,0 +1,38 @@
+{
+  "name": "quantum-memory",
+  "version": "1.0.0",
+  "description": "Quantum Memory - Hybrid Memory System for OpenClaw",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "quantum-memory": "dist/cli/health.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "typecheck": "tsc --noEmit",
+    "health": "node dist/cli/health.js"
+  },
+  "keywords": [
+    "openclaw",
+    "memory",
+    "context-engine",
+    "dag"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "openclaw": "^2026.3.13"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.1",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
