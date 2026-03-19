@@ -265,5 +265,5 @@ npm install && npm run build
 
 ---
 
-*Built with 🔥 by [QSmтco](https://smtco.co)*
+*Built with 🔥 by Qrusher @ Smтco qrusher.smtco@gmail.com
 
