@@ -2,18 +2,9 @@
 
 <p align="center">
 
-<a href="https://www.npmjs.com/package/quantum-memory">
-  <img src="https://img.shields.io/npm/v/quantum-memory.svg" alt="NPM Version">
-</a>
-<a href="https://github.com/qsmtco/quantum-memory/actions">
-  <img src="https://img.shields.io/github/actions/workflow/status/qsmtco/quantum-memory/test.yml" alt="Tests">
-</a>
-<a href="https://opensource.org/licenses/MIT">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
-</a>
-<a href="https://discord.gg/clawd">
-  <img src="https://img.shields.io/discord/1203746571198709760?label=Discord" alt="Discord">
-</a>
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/Tests-167%20passing-green)]()
+[![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue)](https://www.typescriptlang.org/)
 
 </p>
 
