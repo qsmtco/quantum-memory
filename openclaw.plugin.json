@@ -4,6 +4,86 @@
   "description": "Hybrid Memory System with DAG compaction, entity extraction, and auto-recall",
   "kind": "context-engine",
   "version": "1.0.0",
+  "author": "QSmтco",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/qsmtco/quantum-memory",
+    "path": "projects/quantum-memory-V2"
+  },
+  "uiHints": {
+    "databasePath": {
+      "label": "Database Path",
+      "help": "Path to Quantum Memory SQLite database (default: ~/.openclaw/quantum.db)"
+    },
+    "freshTailCount": {
+      "label": "Fresh Tail Count",
+      "help": "Number of recent messages protected from compaction"
+    },
+    "contextThreshold": {
+      "label": "Context Threshold",
+      "help": "Fraction of context window that triggers compaction (0.0–1.0)"
+    },
+    "leafChunkTokens": {
+      "label": "Leaf Chunk Tokens",
+      "help": "Max source tokens per leaf summary chunk"
+    },
+    "leafTargetTokens": {
+      "label": "Leaf Target Tokens",
+      "help": "Target token count for leaf summaries"
+    },
+    "condensedTargetTokens": {
+      "label": "Condensed Target Tokens",
+      "help": "Target token count for condensed summaries"
+    },
+    "summaryModel": {
+      "label": "Summary Model",
+      "help": "Model override for summarization (e.g., 'claude-3-haiku')"
+    },
+    "summaryProvider": {
+      "label": "Summary Provider",
+      "help": "Provider override for summarization"
+    },
+    "expansionModel": {
+      "label": "Expansion Model",
+      "help": "Model override for sub-agent expansion queries"
+    },
+    "expansionProvider": {
+      "label": "Expansion Provider",
+      "help": "Provider override for sub-agent expansion"
+    },
+    "ignoreSessionPatterns": {
+      "label": "Ignored Sessions",
+      "help": "Glob patterns for session keys to exclude from storage"
+    },
+    "statelessSessionPatterns": {
+      "label": "Stateless Sessions",
+      "help": "Glob patterns for read-only sessions"
+    },
+    "skipStatelessSessions": {
+      "label": "Skip Stateless Sessions",
+      "help": "When enabled, skip persistence for stateless sessions"
+    },
+    "entityExtractionEnabled": {
+      "label": "Enable Entity Extraction",
+      "help": "Automatically extract entities from messages"
+    },
+    "knowledgeGraphEnabled": {
+      "label": "Enable Knowledge Graph",
+      "help": "Build knowledge graph from extracted entities"
+    },
+    "autoRecallEnabled": {
+      "label": "Enable Auto-Recall",
+      "help": "Automatically inject relevant memories before each response"
+    },
+    "autoRecallBudget": {
+      "label": "Auto-Recall Budget",
+      "help": "Token budget for auto-recall (low, mid, high)"
+    },
+    "smartDropEnabled": {
+      "label": "Enable Smart Drop",
+      "help": "Automatically drop low-value content"
+    }
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -37,7 +117,71 @@
         "type": "number",
         "default": 2000,
         "description": "Target token count for condensed summaries"
+      },
+      "summaryModel": {
+        "type": "string",
+        "description": "Model override for summarization"
+      },
+      "summaryProvider": {
+        "type": "string",
+        "description": "Provider override for summarization"
+      },
+      "expansionModel": {
+        "type": "string",
+        "description": "Model override for sub-agent expansion"
+      },
+      "expansionProvider": {
+        "type": "string",
+        "description": "Provider override for sub-agent expansion"
+      },
+      "ignoreSessionPatterns": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Glob patterns to exclude from storage"
+      },
+      "statelessSessionPatterns": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Glob patterns for read-only sessions"
+      },
+      "skipStatelessSessions": {
+        "type": "boolean",
+        "default": true,
+        "description": "Skip persistence for stateless sessions"
+      },
+      "entityExtractionEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable entity extraction"
+      },
+      "knowledgeGraphEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable knowledge graph"
+      },
+      "autoRecallEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable auto-recall"
+      },
+      "autoRecallBudget": {
+        "type": "string",
+        "enum": ["low", "mid", "high"],
+        "default": "mid",
+        "description": "Token budget for auto-recall"
+      },
+      "smartDropEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable smart dropping"
       }
+    }
+  },
+  "metadata": {
+    "openclaw": {
+      "minVersion": "2026.3.7",
+      "docs": "https://github.com/qsmtco/quantum-memory",
+      "tags": ["memory", "context-engine", "dag", "entities", "knowledge-graph", "compaction"]
     }
   }
 }

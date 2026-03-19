@@ -4,6 +4,9 @@
   "description": "Quantum Memory - Hybrid Memory System for OpenClaw",
   "main": "dist/index.js",
   "type": "module",
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  },
   "bin": {
     "quantum-memory": "dist/cli/health.js"
   },

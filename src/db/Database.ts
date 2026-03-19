@@ -176,6 +176,39 @@ export class QuantumDatabase {
       )
     `);
 
+    // Schema version tracking (for future migrations)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_versions (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+
+    // Large files table (for large file handling)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS large_files (
+        id TEXT PRIMARY KEY,
+        session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+        file_id TEXT NOT NULL,
+        file_name TEXT,
+        mime_type TEXT,
+        byte_size INTEGER,
+        token_count INTEGER,
+        summary TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+
+    // Summary cache table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS summary_cache (
+        content_hash TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        token_count INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+
     // Create indexes
     this.createIndexes();
   }
@@ -223,6 +256,17 @@ export class QuantumDatabase {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_drop_session ON drop_log(session_id);
       CREATE INDEX IF NOT EXISTS idx_drop_at ON drop_log(dropped_at)
+    `);
+
+    // Large files indexes
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_large_files_session ON large_files(session_id);
+      CREATE INDEX IF NOT EXISTS idx_large_files_file_id ON large_files(file_id)
+    `);
+
+    // Summary cache indexes
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_summary_cache_hash ON summary_cache(content_hash)
     `);
   }
 

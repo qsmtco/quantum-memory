@@ -44,15 +44,33 @@ export interface LLMResponse {
 export class LLMCaller {
   private llmTool: ((params: any) => Promise<any>) | null = null;
   private toolName: string | null = null;
+  
+  // Model/provider overrides (from config)
+  private _summaryModel?: string;
+  private _summaryProvider?: string;
+  private _expansionModel?: string;
+  private _expansionProvider?: string;
 
   /**
    * @param tools - OpenClaw tools object (from ctx.tools)
+   * @param config - Optional config for model/provider overrides
    */
-  constructor(tools: Record<string, any> | undefined) {
+  constructor(tools: Record<string, any> | undefined, config?: {
+    summaryModel?: string;
+    summaryProvider?: string;
+    expansionModel?: string;
+    expansionProvider?: string;
+  }) {
     if (!tools) {
       console.warn('[LLMCaller] No tools provided - LLM calls will fail');
       return;
     }
+
+    // Store overrides
+    this._summaryModel = config?.summaryModel;
+    this._summaryProvider = config?.summaryProvider;
+    this._expansionModel = config?.expansionModel;
+    this._expansionProvider = config?.expansionProvider;
 
     // Find available LLM tool (in order of preference)
     const toolNames = ['chat_completion', 'generate', 'llm', 'openai'];
@@ -82,6 +100,46 @@ export class LLMCaller {
    */
   getToolName(): string | null {
     return this.toolName;
+  }
+
+  /**
+   * Apply summary model/provider overrides to call params
+   */
+  applySummaryOverrides(params: Record<string, any>): Record<string, any> {
+    if (this._summaryModel) {
+      params.model = this._summaryModel;
+    }
+    if (this._summaryProvider) {
+      params.provider = this._summaryProvider;
+    }
+    return params;
+  }
+
+  /**
+   * Apply expansion model/provider overrides to call params
+   */
+  applyExpansionOverrides(params: Record<string, any>): Record<string, any> {
+    if (this._expansionModel) {
+      params.model = this._expansionModel;
+    }
+    if (this._expansionProvider) {
+      params.provider = this._expansionProvider;
+    }
+    return params;
+  }
+
+  /**
+   * Get summary model override (if set)
+   */
+  getSummaryModel(): string | undefined {
+    return this._summaryModel;
+  }
+
+  /**
+   * Get expansion model override (if set)
+   */
+  getExpansionModel(): string | undefined {
+    return this._expansionModel;
   }
 
   /**

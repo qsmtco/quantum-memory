@@ -23,6 +23,32 @@ import { SmartDropper } from '../drop/SmartDropper.js';
 import { ContextStore } from '../engine/ContextStore.js';
 import { extractEntities, estimateTokens } from '../utils/EntityExtractor.js';
 import { LLMCaller } from '../utils/LLMCaller.js';
+import { compileSessionPatterns, matchesSessionPattern } from '../utils/session-patterns.js';
+
+/**
+ * Extract text content from an AgentMessage, handling various message types
+ * AgentMessage can be UserMessage, AssistantMessage, ToolMessage, etc.
+ * Not all have a simple .content string property
+ */
+function extractMessageContent(msg: AgentMessage): string {
+  // Handle messages with direct string content
+  if (typeof (msg as any).content === 'string') {
+    return (msg as any).content;
+  }
+  // Handle messages with parts/content array
+  const parts = (msg as any).parts;
+  if (Array.isArray(parts)) {
+    return parts.map((p: any) => p.text || p.content || '').join('');
+  }
+  // Handle tool messages with output
+  if ((msg as any).output) {
+    return typeof (msg as any).output === 'string' 
+      ? (msg as any).output 
+      : JSON.stringify((msg as any).output);
+  }
+  // Fallback: stringify entire message
+  return JSON.stringify(msg);
+}
 
 /**
  * QuantumContextEngine - Context Engine for OpenClaw
@@ -70,6 +96,53 @@ export class QuantumContextEngine implements ContextEngine {
   // Configuration
   private freshTailCount = 32;
   private contextThreshold = 0.75;
+  
+  // Session pattern matching
+  private ignoreSessionPatterns: RegExp[] = [];
+  private statelessSessionPatterns: RegExp[] = [];
+  private skipStatelessSessions = true;
+
+  /**
+   * Set session patterns from config
+   */
+  setSessionPatterns(config: {
+    ignoreSessionPatterns?: string[];
+    statelessSessionPatterns?: string[];
+    skipStatelessSessions?: boolean;
+  }): void {
+    this.ignoreSessionPatterns = compileSessionPatterns(config.ignoreSessionPatterns || []);
+    this.statelessSessionPatterns = compileSessionPatterns(config.statelessSessionPatterns || []);
+    this.skipStatelessSessions = config.skipStatelessSessions ?? true;
+    
+    if (this.ignoreSessionPatterns.length > 0) {
+      console.log(`[QuantumMemory] Ignoring sessions matching ${this.ignoreSessionPatterns.length} pattern(s)`);
+    }
+    if (this.skipStatelessSessions && this.statelessSessionPatterns.length > 0) {
+      console.log(`[QuantumMemory] Stateless session patterns: ${this.statelessSessionPatterns.length} pattern(s)`);
+    }
+  }
+
+  /**
+   * Check if session should be ignored entirely (no read, no write)
+   */
+  isIgnoredSession(sessionKey: string | undefined): boolean {
+    const candidate = sessionKey?.trim() || '';
+    if (!candidate || this.ignoreSessionPatterns.length === 0) {
+      return false;
+    }
+    return matchesSessionPattern(candidate, this.ignoreSessionPatterns);
+  }
+
+  /**
+   * Check if session is stateless (can read but not write)
+   */
+  isStatelessSession(sessionKey: string | undefined): boolean {
+    const candidate = sessionKey?.trim() || '';
+    if (!this.skipStatelessSessions || !candidate || this.statelessSessionPatterns.length === 0) {
+      return false;
+    }
+    return matchesSessionPattern(candidate, this.statelessSessionPatterns);
+  }
 
   /**
    * Initialize engine state for a session
@@ -104,9 +177,20 @@ export class QuantumContextEngine implements ContextEngine {
    * Must be called by OpenClaw after plugin registration to enable LLM features.
    * @param tools - OpenClaw tools object from context
    */
-  setTools(tools: Record<string, any>): void {
+  /**
+   * Set LLM tools and config from OpenClaw context
+   * 
+   * @param tools - OpenClaw tools object from context
+   * @param config - Optional config for model/provider overrides
+   */
+  setTools(tools: Record<string, any>, config?: {
+    summaryModel?: string;
+    summaryProvider?: string;
+    expansionModel?: string;
+    expansionProvider?: string;
+  }): void {
     this._tools = tools;
-    this._llmCaller = new LLMCaller(tools);
+    this._llmCaller = new LLMCaller(tools, config);
     console.log('[QuantumMemory] LLM tools configured:', this._llmCaller.getToolName() || 'none');
   }
 
@@ -156,6 +240,20 @@ export class QuantumContextEngine implements ContextEngine {
     messages: AgentMessage[];
     isHeartbeat?: boolean;
   }): Promise<IngestBatchResult> {
+    // Check if session should be ignored entirely
+    if (this.isIgnoredSession(params.sessionKey)) {
+      console.log('[QuantumMemory] Skipping ignored session:', params.sessionKey);
+      return { ingestedCount: 0 };
+    }
+    
+    // Check if session is stateless (read-only)
+    const isStateless = this.isStatelessSession(params.sessionKey);
+    if (isStateless) {
+      console.log('[QuantumMemory] Stateless session (read-only):', params.sessionKey);
+      // Still allow reads, but skip writes - return empty
+      return { ingestedCount: 0 };
+    }
+    
     const db = this.getDb();
     const msgStore = this.getMessageStore();
     const entityStore = this.getEntityStore();
@@ -165,7 +263,7 @@ export class QuantumContextEngine implements ContextEngine {
     if (params.isHeartbeat) {
       const stored = msgStore.createBatch(
         params.sessionId,
-        params.messages.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))
+        params.messages.map(m => ({ role: m.role, content: extractMessageContent(m) }))
       );
       return { ingestedCount: stored.length };
     }
@@ -175,7 +273,7 @@ export class QuantumContextEngine implements ContextEngine {
       params.sessionId,
       params.messages.map(m => ({ 
         role: m.role, 
-        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) 
+        content: extractMessageContent(m) 
       }))
     );
 
@@ -183,7 +281,7 @@ export class QuantumContextEngine implements ContextEngine {
     for (let i = 0; i < params.messages.length; i++) {
       const msg = params.messages[i];
       // Handle complex content types - extract string content
-      const text = typeof msg.content === 'string' ? msg.content : '';
+      const text = extractMessageContent(msg);
       
       // Skip very short messages
       if (text.length < 10) continue;
@@ -292,7 +390,7 @@ export class QuantumContextEngine implements ContextEngine {
     for (const item of contextResult.items.filter(i => i.type === 'summary')) {
       assembled.push({
         role: 'system' as any,
-        content: `[Earlier Context]\n${item.content}`,
+        content: `[Earlier Context]\n${typeof item.content === 'string' ? item.content : JSON.stringify(item.content)}`,
       });
     }
 
@@ -300,14 +398,14 @@ export class QuantumContextEngine implements ContextEngine {
     for (const item of contextResult.items.filter(i => i.type === 'message')) {
       assembled.push({
         role: item.role as any,
-        content: item.content,
+        content: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
       });
     }
 
     // Auto-recall: inject relevant memories from past
     let injectionUsed = false;
     if (this._injector) {
-      const recentContent = params.messages.slice(-3).map(m => typeof m.content === 'string' ? m.content : '').join(' ');
+      const recentContent = params.messages.slice(-3).map(m => extractMessageContent(m)).join(' ');
       
       const injection = this._injector.inject(params.sessionId, recentContent, {
         maxTokens: Math.floor(budget * 0.1), // Use 10% for memories
@@ -323,7 +421,7 @@ export class QuantumContextEngine implements ContextEngine {
     }
 
     // Calculate total tokens
-    const totalTokens = assembled.reduce((sum, m) => sum + estimateTokens(typeof m.content === 'string' ? m.content : ''), 0);
+    const totalTokens = assembled.reduce((sum, m) => sum + estimateTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)), 0);
 
     return {
       messages: assembled,
@@ -399,7 +497,7 @@ export class QuantumContextEngine implements ContextEngine {
 
     try {
       // Build content to summarize
-      const content = toSummarize.map(m => m.content).join('\n\n---\n\n');
+      const content = toSummarize.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n\n---\n\n');
       
       // Determine current DAG level
       const currentLevel = summaryStore.getMaxLevel(params.sessionId) + 1;
