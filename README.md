@@ -299,15 +299,26 @@ npm install && npm run build
 
 ---
 
-## Roadmap
+## What's Built vs. What's Coming
 
-We're just getting started:
+### ✅ Already Implemented
 
-- [ ] Vector embeddings for semantic search
-- [ ] Multi-agent memory sharing
-- [ ] Time-decay importance weighting
-- [ ] Memory visualization dashboard
-- [ ] Plugin for other AI frameworks
+- DAG hierarchical summarization (L0→L3)
+- Entity extraction (persons, projects, tools, concepts)
+- Knowledge graph with relationships
+- Auto-recall with relevance scoring
+- Full-text search (SQLite FTS5)
+- Smart dropping of low-value content
+- Session pattern filtering
+- Model/provider overrides
+- Large file handling with summarization
+
+### 🚧 On the Roadmap
+
+- Vector embeddings for semantic search
+- Multi-agent memory sharing
+- Time-decay importance weighting
+- Memory visualization dashboard
 
 ---
 
