@@ -25,16 +25,15 @@ export class SummaryStore {
   create(sessionId: string, level: number, content: string, options: {
     parentId?: string;
     sourceMessageIds?: string[];
-    sourceSummaryIds?: string[];
     modelUsed?: string;
   } = {}): Summary {
     const id = `sum_${randomUUID().slice(0, 12)}`;
     const now = new Date().toISOString();
-    const tokens = Math.ceil(content.length / 4);
+    const tokenCount = Math.ceil(content.length / 4);
     
     this.db.run(
-      `INSERT INTO summaries (id, session_id, parent_id, level, content, source_message_ids, source_summary_ids, tokens, created_at, model_used)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO summaries (id, session_id, parent_summary_id, level, content, source_message_ids, token_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         sessionId,
@@ -42,10 +41,8 @@ export class SummaryStore {
         level,
         content,
         JSON.stringify(options.sourceMessageIds || []),
-        JSON.stringify(options.sourceSummaryIds || []),
-        tokens,
+        tokenCount,
         now,
-        options.modelUsed || null,
       ]
     );
     
@@ -56,8 +53,8 @@ export class SummaryStore {
       level,
       content,
       sourceMessageIds: options.sourceMessageIds || [],
-      sourceSummaryIds: options.sourceSummaryIds || [],
-      tokens,
+      sourceSummaryIds: [],
+      tokens: tokenCount,
       createdAt: now,
       modelUsed: options.modelUsed,
     };
@@ -145,7 +142,7 @@ export class SummaryStore {
    */
   getTotalTokens(sessionId: string): number {
     const result = this.db.get(
-      `SELECT SUM(tokens) as total FROM summaries WHERE session_id = ?`,
+      `SELECT SUM(token_count) as total FROM summaries WHERE session_id = ?`,
       [sessionId]
     ) as { total: number } | undefined;
     
@@ -155,9 +152,9 @@ export class SummaryStore {
   /**
    * Get messages that need summarization (not compacted, older than fresh tail)
    */
-  getMessagesToSummarize(sessionId: string, freshTailCount: number, limit: number = 100): Array<{ id: string; content: string; tokens: number }> {
+  getMessagesToSummarize(sessionId: string, freshTailCount: number, limit: number = 100): Array<{ id: string; content: string; tokenCount: number }> {
     const rows = this.db.query(
-      `SELECT id, content, tokens FROM messages 
+      `SELECT id, content, token_count FROM messages 
        WHERE session_id = ? AND is_compacted = 0 
        ORDER BY created_at ASC 
        LIMIT ? OFFSET ?`,
@@ -165,9 +162,9 @@ export class SummaryStore {
     );
     
     return rows.map((row: any) => ({
-      id: row.id,
+      id: String(row.id),
       content: row.content,
-      tokens: row.tokens,
+      tokenCount: row.token_count,
     }));
   }
 
@@ -207,14 +204,14 @@ export class SummaryStore {
     return {
       id: row.id,
       sessionId: row.session_id,
-      parentId: row.parent_id,
+      parentId: row.parent_summary_id,
       level: row.level,
       content: row.content,
       sourceMessageIds: JSON.parse(row.source_message_ids || '[]'),
-      sourceSummaryIds: JSON.parse(row.source_summary_ids || '[]'),
-      tokens: row.tokens,
+      sourceSummaryIds: [],
+      tokens: row.token_count,
       createdAt: row.created_at,
-      modelUsed: row.model_used,
+      modelUsed: undefined,
     };
   }
 }

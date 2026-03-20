@@ -57,6 +57,60 @@ export class SearchEngine {
   }
 
   /**
+   * Full-text search using FTS5 with BM25 ranking.
+   * Falls back to LIKE search if FTS5 is unavailable or fails.
+   */
+  searchAll(sessionId: string, query: string, options?: SearchOptions): SearchResult[] {
+    const limit = options?.limit ?? 20;
+
+    // Try FTS5 first
+    try {
+      // FTS5 MATCH query — escape special FTS5 characters
+      const ftsQuery = this.escapeFtsQuery(query);
+
+      // Use bm25() ranking (lower score = better match, negate for descending)
+      // Join with messages table via rowid to get full message data
+      const ftsSql = `
+        SELECT m.id, m.session_id, m.content, m.role,
+               bm25(messages_fts) as bm25_score,
+               highlight(messages_fts, 0, '[', ']') as snippet
+        FROM messages_fts
+        JOIN messages m ON messages_fts.rowid = m.rowid
+        WHERE messages_fts MATCH ?
+          AND m.session_id = ?
+          AND m.is_compacted = 0
+        ORDER BY bm25_score
+        LIMIT ?
+      `;
+
+      const rows = this.db.query(ftsSql, [ftsQuery, sessionId, limit]);
+
+      return rows.map((row: any) => ({
+        id: row.id,
+        sessionId: row.session_id,
+        content: row.content,
+        role: row.role,
+        score: Math.max(0, -row.bm25_score), // bm25 is negative, flip to positive
+        highlights: row.snippet ? [row.snippet] : [row.content.slice(0, 200)],
+      }));
+    } catch (ftsError) {
+      // Fallback to LIKE search if FTS5 fails
+      console.warn('[SearchEngine] FTS5 search failed, falling back to LIKE:', ftsError);
+      return this.search(sessionId, query, { ...options, limit });
+    }
+  }
+
+  /**
+   * Escape special FTS5 characters in a query string.
+   * FTS5 has special chars: " * ^ - : ( )
+   */
+  private escapeFtsQuery(query: string): string {
+    // Wrap in quotes for phrase search, escape internal quotes
+    const escaped = query.replace(/"/g, '""');
+    return `"${escaped}"`;
+  }
+
+  /**
    * Search across multiple sessions
    */
   searchGlobal(query: string, options?: {

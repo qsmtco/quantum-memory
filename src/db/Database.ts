@@ -70,8 +70,10 @@ export class QuantumDatabase {
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now')),
-        last_accessed TEXT
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT,
+        last_accessed TEXT,
+        metadata TEXT
       )
     `);
 
@@ -79,69 +81,70 @@ export class QuantumDatabase {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
-        project_id TEXT REFERENCES projects(id),
-        started_at TEXT DEFAULT (datetime('now')),
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
         ended_at TEXT,
-        status TEXT DEFAULT 'active',
-        metadata TEXT
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'archived')),
+        metadata TEXT,
+        UNIQUE (id)
       )
     `);
 
-    // Messages table
+    // Messages table (schema v1)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
-        session_id TEXT REFERENCES sessions(id),
-        role TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
         content TEXT NOT NULL,
-        tokens INTEGER,
-        created_at TEXT DEFAULT (datetime('now')),
+        token_count INTEGER,
+        is_compacted INTEGER NOT NULL DEFAULT 0,
         importance_score REAL DEFAULT 0.5,
-        is_compacted INTEGER DEFAULT 0
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (session_id, id)
       )
     `);
 
-    // Summaries table (DAG)
+    // Summaries table (DAG nodes) (schema v1)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS summaries (
         id TEXT PRIMARY KEY,
-        session_id TEXT REFERENCES sessions(id),
-        parent_id TEXT REFERENCES summaries(id),
-        level INTEGER NOT NULL,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        parent_summary_id TEXT REFERENCES summaries(id) ON DELETE SET NULL,
+        level INTEGER NOT NULL DEFAULT 0,
         content TEXT NOT NULL,
+        token_count INTEGER,
         source_message_ids TEXT,
-        source_summary_ids TEXT,
-        tokens INTEGER,
-        created_at TEXT DEFAULT (datetime('now')),
-        model_used TEXT
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `);
 
-    // Entities table
+    // Entities table (schema v1)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS entities (
         id TEXT PRIMARY KEY,
-        session_id TEXT REFERENCES sessions(id),
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         type TEXT NOT NULL,
-        first_seen TEXT DEFAULT (datetime('now')),
-        last_seen TEXT,
-        mention_count INTEGER DEFAULT 1,
+        mention_count INTEGER NOT NULL DEFAULT 1,
+        first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen TEXT NOT NULL DEFAULT (datetime('now')),
         metadata TEXT
       )
     `);
 
-    // Relations table (Knowledge Graph)
+    // Relations table (Knowledge Graph) (schema v1)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS relations (
         id TEXT PRIMARY KEY,
-        session_id TEXT REFERENCES sessions(id),
-        from_entity_id TEXT REFERENCES entities(id),
-        to_entity_id TEXT REFERENCES entities(id),
-        relationship TEXT NOT NULL,
-        confidence REAL DEFAULT 1.0,
-        source_message_id TEXT REFERENCES messages(id),
-        created_at TEXT DEFAULT (datetime('now'))
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        from_entity TEXT NOT NULL,
+        to_entity TEXT NOT NULL,
+        relation_type TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 1.0,
+        source_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (session_id, from_entity, to_entity, relation_type)
       )
     `);
 
@@ -152,6 +155,7 @@ export class QuantumDatabase {
         session_id TEXT REFERENCES sessions(id),
         content TEXT NOT NULL,
         source_ids TEXT,
+        query TEXT,
         injected_at TEXT DEFAULT (datetime('now')),
         was_useful INTEGER
       )
@@ -172,7 +176,8 @@ export class QuantumDatabase {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS config (
         key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `);
 
@@ -221,29 +226,22 @@ export class QuantumDatabase {
 
     // Messages indexes
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
-      CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at)
+      CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)
     `);
 
     // Summaries indexes
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_summaries_session ON summaries(session_id);
-      CREATE INDEX IF NOT EXISTS idx_summaries_level ON summaries(level);
-      CREATE INDEX IF NOT EXISTS idx_summaries_parent ON summaries(parent_id)
+      CREATE INDEX IF NOT EXISTS idx_summaries_session ON summaries(session_id, level)
     `);
 
     // Entities indexes
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_entities_session ON entities(session_id);
-      CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
-      CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type)
+      CREATE INDEX IF NOT EXISTS idx_entities_session ON entities(session_id, type)
     `);
 
     // Relations indexes
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_entity_id);
-      CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity_id);
-      CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(relationship)
+      CREATE INDEX IF NOT EXISTS idx_relations_session ON relations(session_id, relation_type)
     `);
 
     // Memory inject indexes

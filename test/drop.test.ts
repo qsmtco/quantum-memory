@@ -37,20 +37,21 @@ describe('SmartDropper', () => {
     msgStore.updateImportance(m2.id, 0.1);
     msgStore.updateImportance(m3.id, 0.5);
     
+    // analyze() is sync and checks importance_score directly
     const analysis = dropper.analyze(sessionId, 0.3);
     
     expect(analysis.length).toBe(1);
     expect(analysis[0].messageId).toBe(m2.id);
   });
 
-  it('should drop low-value messages', () => {
+  it('should drop low-value messages', async () => {
     const m1 = msgStore.create(sessionId, 'user', 'Drop me');
     const m2 = msgStore.create(sessionId, 'user', 'Keep me');
     
     msgStore.updateImportance(m1.id, 0.1);
     msgStore.updateImportance(m2.id, 0.8);
     
-    const result = dropper.drop(sessionId, 0.3);
+    const result = await dropper.drop(sessionId, 0.3);
     
     expect(result.dropped).toBe(1);
     
@@ -58,11 +59,11 @@ describe('SmartDropper', () => {
     expect(m1After?.isCompacted).toBe(true);
   });
 
-  it('should support dry run', () => {
+  it('should support dry run', async () => {
     const m1 = msgStore.create(sessionId, 'user', 'Drop me');
     msgStore.updateImportance(m1.id, 0.1);
     
-    const result = dropper.drop(sessionId, 0.3, true);
+    const result = await dropper.drop(sessionId, 0.3, true);
     
     expect(result.dropped).toBe(1);
     
@@ -70,11 +71,11 @@ describe('SmartDropper', () => {
     expect(m1After?.isCompacted).toBe(false); // Not actually dropped
   });
 
-  it('should get drop log', () => {
+  it('should get drop log', async () => {
     const m1 = msgStore.create(sessionId, 'user', 'Dropped');
     msgStore.updateImportance(m1.id, 0.1);
     
-    dropper.drop(sessionId, 0.3);
+    await dropper.drop(sessionId, 0.3);
     
     const log = dropper.getDropLog(sessionId);
     
@@ -82,11 +83,11 @@ describe('SmartDropper', () => {
     expect(log[0].messageIds).toContain(m1.id);
   });
 
-  it('should return empty when no messages to drop', () => {
+  it('should return empty when no messages to drop', async () => {
     msgStore.create(sessionId, 'user', 'Important');
     msgStore.updateImportance(msgStore.getBySession(sessionId)[0].id, 0.9);
     
-    const result = dropper.drop(sessionId, 0.3);
+    const result = await dropper.drop(sessionId, 0.3);
     
     expect(result.dropped).toBe(0);
   });

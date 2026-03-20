@@ -73,7 +73,7 @@ export class AutoRecallInjector {
     const entities = this.entityStore.search(sessionId, entityName);
     if (entities.length === 0) return null;
     
-    const entity = entities[0];
+    const entity = entities[0]!;
     const searchResults = this.searchEngine.search(sessionId, entity.name, {
       limit: 10,
     });

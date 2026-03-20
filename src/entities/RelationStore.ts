@@ -5,7 +5,7 @@ export interface Relation {
   sessionId: string;
   fromEntityId: string;
   toEntityId: string;
-  relationship: string;
+  relation_type: string;
   confidence: number;
   sourceMessageId?: string;
   createdAt: string;
@@ -20,7 +20,7 @@ export class RelationStore {
   /**
    * Create a relation
    */
-  create(sessionId: string, fromEntityId: string, toEntityId: string, relationship: string, options?: {
+  create(sessionId: string, fromEntityId: string, toEntityId: string, relation_type: string, options?: {
     confidence?: number;
     sourceMessageId?: string;
   }): Relation {
@@ -28,9 +28,9 @@ export class RelationStore {
     const now = new Date().toISOString();
     
     this.db.run(
-      `INSERT INTO relations (id, session_id, from_entity_id, to_entity_id, relationship, confidence, source_message_id, created_at)
+      `INSERT INTO relations (id, session_id, from_entity, to_entity, relation_type, confidence, source_message_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, sessionId, fromEntityId, toEntityId, relationship, options?.confidence ?? 1.0, options?.sourceMessageId ?? null, now]
+      [id, sessionId, fromEntityId, toEntityId, relation_type, options?.confidence ?? 1.0, options?.sourceMessageId ?? null, now]
     );
     
     return {
@@ -38,7 +38,7 @@ export class RelationStore {
       sessionId,
       fromEntityId,
       toEntityId,
-      relationship,
+      relation_type,
       confidence: options?.confidence ?? 1.0,
       sourceMessageId: options?.sourceMessageId,
       createdAt: now,
@@ -63,7 +63,7 @@ export class RelationStore {
    */
   getByEntity(entityId: string): Relation[] {
     const rows = this.db.query(
-      `SELECT * FROM relations WHERE from_entity_id = ? OR to_entity_id = ? ORDER BY created_at DESC`,
+      `SELECT * FROM relations WHERE from_entity = ? OR to_entity = ? ORDER BY created_at DESC`,
       [entityId, entityId]
     );
     
@@ -75,7 +75,7 @@ export class RelationStore {
    */
   getOutgoing(entityId: string): Relation[] {
     const rows = this.db.query(
-      `SELECT * FROM relations WHERE from_entity_id = ? ORDER BY created_at DESC`,
+      `SELECT * FROM relations WHERE from_entity = ? ORDER BY created_at DESC`,
       [entityId]
     );
     
@@ -87,7 +87,7 @@ export class RelationStore {
    */
   getIncoming(entityId: string): Relation[] {
     const rows = this.db.query(
-      `SELECT * FROM relations WHERE to_entity_id = ? ORDER BY created_at DESC`,
+      `SELECT * FROM relations WHERE to_entity = ? ORDER BY created_at DESC`,
       [entityId]
     );
     
@@ -97,10 +97,10 @@ export class RelationStore {
   /**
    * Get relations by type
    */
-  getByType(sessionId: string, relationship: string): Relation[] {
+  getByType(sessionId: string, relation_type: string): Relation[] {
     const rows = this.db.query(
-      `SELECT * FROM relations WHERE session_id = ? AND relationship = ? ORDER BY confidence DESC`,
-      [sessionId, relationship]
+      `SELECT * FROM relations WHERE session_id = ? AND relation_type = ? ORDER BY confidence DESC`,
+      [sessionId, relation_type]
     );
     
     return rows.map((row: any) => this.mapRowToRelation(row));
@@ -121,10 +121,10 @@ export class RelationStore {
   /**
    * Check if relation exists
    */
-  exists(fromEntityId: string, toEntityId: string, relationship: string): boolean {
+  exists(fromEntityId: string, toEntityId: string, relation_type: string): boolean {
     const row = this.db.get(
-      `SELECT id FROM relations WHERE from_entity_id = ? AND to_entity_id = ? AND relationship = ?`,
-      [fromEntityId, toEntityId, relationship]
+      `SELECT id FROM relations WHERE from_entity = ? AND to_entity = ? AND relation_type = ?`,
+      [fromEntityId, toEntityId, relation_type]
     );
     
     return !!row;
@@ -171,13 +171,13 @@ export class RelationStore {
    */
   countByType(sessionId: string): Record<string, number> {
     const rows = this.db.query(
-      `SELECT relationship, COUNT(*) as count FROM relations WHERE session_id = ? GROUP BY relationship`,
+      `SELECT relation_type, COUNT(*) as count FROM relations WHERE session_id = ? GROUP BY relation_type`,
       [sessionId]
     );
     
     const result: Record<string, number> = {};
     rows.forEach((row: any) => {
-      result[row.relationship] = row.count;
+      result[row.relation_type] = row.count;
     });
     
     return result;
@@ -190,9 +190,9 @@ export class RelationStore {
     return {
       id: row.id,
       sessionId: row.session_id,
-      fromEntityId: row.from_entity_id,
-      toEntityId: row.to_entity_id,
-      relationship: row.relationship,
+      fromEntityId: row.from_entity,
+      toEntityId: row.to_entity,
+      relation_type: row.relation_type,
       confidence: row.confidence,
       sourceMessageId: row.source_message_id,
       createdAt: row.created_at,

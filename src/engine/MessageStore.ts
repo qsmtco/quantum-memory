@@ -33,7 +33,7 @@ export class MessageStore {
     const tokens = estimateTokens(content);
     
     this.db.run(
-      `INSERT INTO messages (id, session_id, role, content, tokens, created_at, importance_score, is_compacted)
+      `INSERT INTO messages (id, session_id, role, content, token_count, created_at, importance_score, is_compacted)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, sessionId, role, content, tokens, now, 0.5, 0]
     );
@@ -62,7 +62,7 @@ export class MessageStore {
       const tokens = estimateTokens(msg.content);
       
       this.db.run(
-        `INSERT INTO messages (id, session_id, role, content, tokens, created_at, importance_score, is_compacted)
+        `INSERT INTO messages (id, session_id, role, content, token_count, created_at, importance_score, is_compacted)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, sessionId, msg.role, msg.content, tokens, now, 0.5, 0]
       );
@@ -146,7 +146,7 @@ export class MessageStore {
    */
   getTotalTokens(sessionId: string): number {
     const result = this.db.get(
-      `SELECT SUM(tokens) as total FROM messages WHERE session_id = ? AND is_compacted = 0`,
+      `SELECT SUM(token_count) as total FROM messages WHERE session_id = ? AND is_compacted = 0`,
       [sessionId]
     ) as { total: number } | undefined;
     
@@ -222,11 +222,11 @@ export class MessageStore {
    */
   private mapRowToMessage(row: any): Message {
     return {
-      id: row.id,
+      id: String(row.id),
       sessionId: row.session_id,
       role: row.role,
       content: row.content,
-      tokens: row.tokens,
+      tokens: row.token_count,
       createdAt: row.created_at,
       importanceScore: row.importance_score,
       isCompacted: row.is_compacted === 1,

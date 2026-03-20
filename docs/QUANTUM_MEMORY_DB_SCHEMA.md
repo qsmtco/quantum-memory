@@ -1,26 +1,25 @@
 # Quantum Memory - Database Schema Specification
 
 **Document ID:** QM-DB-001  
-**Version:** 1.0  
-**Date:** 2026-03-14  
+**Version:** 1.1  
+**Date:** 2026-03-20  
 **Project:** Quantum Memory - Hybrid Memory System
+
+> **Source of Truth:** `src/db/migrations/001-initial-schema.ts`
+> This document reflects the implemented schema. The migration file is authoritative.
 
 ---
 
 ## Table of Contents
 
 1. [Database Overview](#1-database-overview)
-2. [Schema Diagrams](#2-schema-diagrams)
-3. [Table Specifications](#3-table-specifications)
-4. [Indexes](#4-indexes)
-5. [Relationships](#5-relationships)
-6. [Migrations](#6-migrations)
+2. [Table Specifications](#2-table-specifications)
+3. [Indexes](#3-indexes)
+4. [Relationships](#4-relationships)
 
 ---
 
 ## 1. Database Overview
-
-### 1.1 Database File
 
 | Property | Value |
 |----------|-------|
@@ -28,505 +27,241 @@
 | **Location** | `~/.openclaw/quantum.db` |
 | **Format** | SQLite 3 |
 | **Journal Mode** | WAL (Write-Ahead Logging) |
-| **Synchronous** | NORMAL |
-
-### 1.2 Technology
-
-- **Driver:** better-sqlite3 (synchronous)
-- **ORM:** None (raw SQL)
-- **Migrations:** Version-controlled SQL files
+| **Foreign Keys** | ENFORCED |
 
 ---
 
-## 2. Schema Diagrams
+## 2. Table Specifications
 
-### 2.1 Entity Relationship Diagram
-
-```
-┌─────────────┐       ┌─────────────┐
-│  projects   │       │  sessions   │
-├─────────────┤       ├─────────────┤
-│ id (PK)     │◄──────│ project_id  │
-│ name        │       │ id (PK)     │
-│ created_at  │       │ started_at  │
-│ last_accessed│      │ ended_at    │
-└─────────────┘       │ status      │
-                     └──────┬──────┘
-                            │
-              ┌─────────────┼─────────────┐
-              │             │             │
-              ▼             ▼             ▼
-       ┌────────────┐ ┌────────────┐ ┌────────────┐
-       │ messages   │ │ summaries  │ │  entities  │
-       ├────────────┤ ├────────────┤ ├────────────┤
-       │ id (PK)    │ │ id (PK)    │ │ id (PK)    │
-       │ session_id │ │ session_id │ │ session_id │
-       │ role       │ │ parent_id  │ │ name       │
-       │ content    │ │ level      │ │ type       │
-       │ tokens     │ │ content    │ │ mention_cnt│
-       │ importance │ │ source_ids │ └─────┬──────┘
-       └─────┬──────┘ └──────┬──────┘       │
-             │               │               │
-             │               │               │
-             ▼               ▼               ▼
-       ┌────────────┐ ┌────────────┐ ┌────────────┐
-       │  relations │ │memory_inject│ │ drop_log   │
-       ├────────────┤ ├────────────┤ ├────────────┤
-       │ from_ent  │ │ session_id │ │ session_id │
-       │ to_ent    │ │ content    │ │ message_ids│
-       │ relation  │ │ was_useful │ │ reason     │
-       └───────────┘ └────────────┘ └────────────┘
-```
-
-### 2.2 Hierarchy Diagram
-
-```
-projects
-  │
-  └── sessions
-        │
-        ├── messages (raw conversation)
-        │
-        ├── summaries (DAG)
-        │     │
-        │     ├── level 0 (leaf)
-        │     │
-        │     ├── level 1 (condensed)
-        │     │
-        │     └── level N (higher)
-        │
-        ├── entities
-        │     │
-        │     └── relations (KG)
-        │
-        ├── memory_inject
-        │
-        └── drop_log
-```
-
----
-
-## 3. Table Specifications
-
-### 3.1 projects
+### 2.1 `projects`
 
 Top-level organization unit.
 
-```sql
-CREATE TABLE projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    last_accessed TEXT
-);
-```
-
-**Fields:**
-
-| Field | Type | Constraints | Description |
-|-------|------|------------|-------------|
-| id | TEXT | PRIMARY KEY | UUID, e.g., "proj_abc123" |
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| id | TEXT | PRIMARY KEY | UUID |
 | name | TEXT | NOT NULL | Display name |
-| created_at | TEXT | DEFAULT | Creation timestamp |
-| last_accessed | TEXT | - | Last access timestamp |
+| created_at | TEXT | NOT NULL | Creation timestamp |
+| updated_at | TEXT | - | Last update |
+| metadata | TEXT | - | JSON for extensibility |
 
 ---
 
-### 3.2 sessions
+### 2.2 `sessions`
 
 Conversation container.
 
-```sql
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    project_id TEXT REFERENCES projects(id),
-    started_at TEXT DEFAULT (datetime('now')),
-    ended_at TEXT,
-    status TEXT DEFAULT 'active',
-    metadata TEXT
-);
-```
-
-**Fields:**
-
-| Field | Type | Constraints | Description |
-|-------|------|------------|-------------|
-| id | TEXT | PRIMARY KEY | UUID, e.g., "sess_abc123" |
-| project_id | TEXT | REFERENCES projects(id) | Parent project |
-| started_at | TEXT | DEFAULT | Session start |
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| id | TEXT | PRIMARY KEY, UNIQUE | UUID, e.g., "sess_abc123" |
+| project_id | TEXT | REFERENCES projects(id) ON DELETE SET NULL | Parent project |
+| started_at | TEXT | NOT NULL | Session start |
 | ended_at | TEXT | - | Session end (null if active) |
-| status | TEXT | DEFAULT 'active' | active/completed/archived |
+| status | TEXT | NOT NULL, CHECK IN | active/completed/archived |
 | metadata | TEXT | - | JSON for extensibility |
-
-**Status Values:**
-- `active` - Currently running
-- `completed` - Normal end
-- `archived` - Moved to long-term storage
 
 ---
 
-### 3.3 messages
+### 2.3 `messages`
 
 Raw conversation messages.
 
-```sql
-CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    tokens INTEGER,
-    created_at TEXT DEFAULT (datetime('now')),
-    importance_score REAL DEFAULT 0.5,
-    is_compacted INTEGER DEFAULT 0
-);
-```
-
-**Fields:**
-
-| Field | Type | Constraints | Description |
-|-------|------|------------|-------------|
-| id | TEXT | PRIMARY KEY | UUID |
-| session_id | TEXT | REFERENCES sessions(id) | Parent session |
-| role | TEXT | NOT NULL | user/assistant/system |
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Auto-increment ID |
+| session_id | TEXT | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
+| role | TEXT | NOT NULL, CHECK IN | system/user/assistant/tool |
 | content | TEXT | NOT NULL | Message text |
-| tokens | INTEGER | - | Token count |
-| created_at | TEXT | DEFAULT | Timestamp |
-| importance_score | REAL | DEFAULT 0.5 | 0.0-1.0 |
-| is_compacted | INTEGER | DEFAULT 0 | 0=false, 1=true |
+| token_count | INTEGER | - | Token count |
+| is_compacted | INTEGER | NOT NULL DEFAULT 0 | 0=false, 1=true |
+| created_at | TEXT | NOT NULL | Timestamp |
+
+**Constraint:** `UNIQUE(session_id, id)`
 
 ---
 
-### 3.4 summaries
+### 2.4 `summaries`
 
 DAG nodes for compacted summaries.
 
-```sql
-CREATE TABLE summaries (
-    id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
-    parent_id TEXT REFERENCES summaries(id),
-    level INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    source_message_ids TEXT,
-    source_summary_ids TEXT,
-    tokens INTEGER,
-    created_at TEXT DEFAULT (datetime('now')),
-    model_used TEXT
-);
-```
-
-**Fields:**
-
-| Field | Type | Constraints | Description |
-|-------|------|------------|-------------|
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
 | id | TEXT | PRIMARY KEY | UUID |
-| session_id | TEXT | REFERENCES sessions(id) | Parent session |
-| parent_id | TEXT | REFERENCES summaries(id) | DAG parent |
-| level | INTEGER | NOT NULL | 0=leaf, 1=condensed, N=higher |
+| session_id | TEXT | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
+| parent_summary_id | TEXT | FK → summaries(id) ON DELETE SET NULL | DAG parent (null = root) |
+| level | INTEGER | NOT NULL DEFAULT 0 | 0=leaf, 1=condensed, N=higher |
 | content | TEXT | NOT NULL | Summary text |
-| source_message_ids | TEXT | - | JSON array of message IDs |
-| source_summary_ids | TEXT | - | JSON array of summary IDs |
-| tokens | INTEGER | - | Token count |
-| created_at | TEXT | DEFAULT | Timestamp |
-| model_used | TEXT | - | LLM model used |
+| token_count | INTEGER | - | Token count |
+| source_message_ids | TEXT | - | JSON array of source message IDs |
+| created_at | TEXT | NOT NULL | Timestamp |
 
 ---
 
-### 3.5 entities
+### 2.5 `entities`
 
 Extracted named entities.
 
-```sql
-CREATE TABLE entities (
-    id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    first_seen TEXT DEFAULT (datetime('now')),
-    last_seen TEXT,
-    mention_count INTEGER DEFAULT 1,
-    metadata TEXT
-);
-```
-
-**Entity Types:**
-
-| Type | Description |
-|------|-------------|
-| person | People's names |
-| project | Project names |
-| tool | Commands, functions |
-| concept | Abstract ideas |
-| preference | User preferences |
-| decision | Important choices |
-| fact | Asserted truths |
-
-**Fields:**
-
-| Field | Type | Constraints | Description |
-|-------|------|------------|-------------|
-| id | TEXT | PRIMARY KEY | UUID |
-| session_id | TEXT | REFERENCES sessions(id) | Parent session |
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Auto-increment |
+| session_id | TEXT | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
 | name | TEXT | NOT NULL | Entity name |
-| type | TEXT | NOT NULL | Entity type |
-| first_seen | TEXT | DEFAULT | First mention |
-| last_seen | TEXT | - | Last mention |
-| mention_count | INTEGER | DEFAULT 1 | Mention count |
+| type | TEXT | NOT NULL | Entity type (person/project/tool/etc.) |
+| mention_count | INTEGER | NOT NULL DEFAULT 1 | Mention count |
+| first_seen | TEXT | NOT NULL | First mention timestamp |
+| last_seen | TEXT | NOT NULL | Last mention timestamp |
 | metadata | TEXT | - | JSON for extensibility |
+
+**Constraint:** `UNIQUE(session_id, name, type)`
 
 ---
 
-### 3.6 relations
+### 2.6 `relations`
 
 Knowledge graph relationships.
 
-```sql
-CREATE TABLE relations (
-    id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
-    from_entity_id TEXT REFERENCES entities(id),
-    to_entity_id TEXT REFERENCES entities(id),
-    relationship TEXT NOT NULL,
-    confidence REAL DEFAULT 1.0,
-    source_message_id TEXT REFERENCES messages(id),
-    created_at TEXT DEFAULT (datetime('now'))
-);
-```
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Auto-increment |
+| session_id | TEXT | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
+| from_entity | TEXT | NOT NULL | Source entity name |
+| to_entity | TEXT | NOT NULL | Target entity name |
+| relation_type | TEXT | NOT NULL | knows/depends_on/uses/etc. |
+| confidence | REAL | NOT NULL DEFAULT 1.0 | 0.0-1.0 |
+| source_message_id | INTEGER | FK → messages(id) ON DELETE SET NULL | Source message |
+| created_at | TEXT | NOT NULL | Timestamp |
 
-**Relationship Types:**
+**Constraint:** `UNIQUE(session_id, from_entity, to_entity, relation_type)`
 
-| Type | Description |
-|------|-------------|
-| knows | Person knows person |
-| depends_on | Project depends on project |
-| created_by | Entity created by person |
-| uses | Tool uses entity |
-| decided | Person made decision |
-| prefers | Person prefers preference |
-
-**Fields:**
-
-| Field | Type | Constraints | Description |
-|-------|------|------------|-------------|
-| id | TEXT | PRIMARY KEY | UUID |
-| session_id | TEXT | REFERENCES sessions(id) | Parent session |
-| from_entity_id | TEXT | REFERENCES entities(id) | Source entity |
-| to_entity_id | TEXT | REFERENCES entities(id) | Target entity |
-| relationship | TEXT | NOT NULL | Relationship type |
-| confidence | REAL | DEFAULT 1.0 | 0.0-1.0 |
-| source_message_id | TEXT | REFERENCES messages(id) | Source |
-| created_at | TEXT | DEFAULT | Timestamp |
+> Note: `from_entity` and `to_entity` are TEXT (entity names) rather than foreign keys. The schema tracks names directly for simplicity rather than entity IDs.
 
 ---
 
-### 3.7 memory_inject
+### 2.7 `memory_inject`
 
 Auto-recall cache.
 
-```sql
-CREATE TABLE memory_inject (
-    id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
-    content TEXT NOT NULL,
-    source_ids TEXT,
-    injected_at TEXT DEFAULT (datetime('now')),
-    was_useful INTEGER
-);
-```
-
-**Fields:**
-
-| Field | Type | Constraints | Description |
-|-------|------|------------|-------------|
-| id | TEXT | PRIMARY KEY | UUID |
-| session_id | TEXT | REFERENCES sessions(id) | Parent session |
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Auto-increment |
+| session_id | TEXT | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
 | content | TEXT | NOT NULL | Injected content |
 | source_ids | TEXT | - | JSON array of source IDs |
-| injected_at | TEXT | DEFAULT | Injection timestamp |
-| was_useful | INTEGER | - | NULL=unknown, 0=no, 1=yes |
+| query | TEXT | - | Query that triggered recall |
+| injected_at | TEXT | NOT NULL | Injection timestamp |
 
 ---
 
-### 3.8 drop_log
+### 2.8 `drop_log`
 
 Smart drop tracking.
 
-```sql
-CREATE TABLE drop_log (
-    id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
-    message_ids TEXT,
-    reason TEXT,
-    dropped_at TEXT DEFAULT (datetime('now'))
-);
-```
-
-**Drop Reasons:**
-
-| Reason | Description |
-|--------|-------------|
-| low_importance | Score below threshold |
-| redundancy | Duplicate content |
-| age | Old + not referenced |
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Auto-increment |
+| session_id | TEXT | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
+| message_ids | TEXT | NOT NULL | JSON array of dropped message IDs |
+| reason | TEXT | NOT NULL | low_importance/redundancy/age |
+| dropped_at | TEXT | NOT NULL | Drop timestamp |
 
 ---
 
-### 3.9 config
+### 2.9 `large_files`
+
+Large file handling (for content > 25K tokens).
+
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| id | TEXT | PRIMARY KEY | UUID |
+| session_id | TEXT | FK → sessions(id) ON DELETE CASCADE | Parent session |
+| file_id | TEXT | NOT NULL | Reference ID |
+| file_name | TEXT | - | Original filename |
+| mime_type | TEXT | - | MIME type |
+| byte_size | INTEGER | - | Original byte size |
+| token_count | INTEGER | - | Token count |
+| summary | TEXT | - | Auto-generated summary |
+| created_at | TEXT | NOT NULL | Timestamp |
+
+---
+
+### 2.10 `summary_cache`
+
+LLM summary caching.
+
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| content_hash | TEXT | PRIMARY KEY | SHA/hash of content |
+| summary | TEXT | NOT NULL | Cached summary text |
+| token_count | INTEGER | - | Token count |
+| created_at | TEXT | NOT NULL | Cache timestamp |
+
+---
+
+### 2.11 `config`
 
 Configuration storage.
 
-```sql
-CREATE TABLE config (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-```
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| key | TEXT | PRIMARY KEY | Config key |
+| value | TEXT | NOT NULL | Config value |
+| updated_at | TEXT | NOT NULL | Last update |
 
 ---
 
-## 4. Indexes
+### 2.12 `schema_versions`
 
-### 4.1 Primary Indexes
+Migration tracking.
 
-| Table | Index Name | Fields | Purpose |
-|-------|-----------|--------|---------|
-| messages | idx_messages_session | session_id | Session lookups |
-| messages | idx_messages_created | created_at | Date range queries |
-| summaries | idx_summaries_session | session_id | Session lookups |
-| summaries | idx_summaries_level | level | DAG traversal |
-| entities | idx_entities_session | session_id | Session lookups |
-| entities | idx_entities_name | name | Entity search |
-| relations | idx_relations_from | from_entity_id | Graph traversal |
-| relations | idx_relations_to | to_entity_id | Graph traversal |
+| Column | Type | Constraints | Description |
+|--------|------|------------|-------------|
+| version | INTEGER | PRIMARY KEY | Migration version |
+| applied_at | TEXT | NOT NULL | When migration was applied |
+
+---
+
+## 3. Indexes
+
+| Table | Index | Fields | Purpose |
+|-------|-------|--------|---------|
+| messages | idx_messages_session | session_id, created_at | Session retrieval |
+| summaries | idx_summaries_session | session_id, level | DAG traversal |
+| entities | idx_entities_session | session_id, type | Entity lookups |
+| relations | idx_relations_session | session_id, relation_type | Relation lookups |
 | memory_inject | idx_inject_session | session_id | Recall lookups |
-| drop_log | idx_drop_session | session_id | Audit queries |
-
-### 4.2 Full-Text Search
-
-```sql
-CREATE VIRTUAL TABLE messages_fts USING fts5(
-    content,
-    content='messages',
-    content_rowid='rowid'
-);
-```
-
-### 4.3 Index Creation SQL
-
-```sql
--- Messages
-CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
-CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
-
--- Summaries  
-CREATE INDEX IF NOT EXISTS idx_summaries_session ON summaries(session_id);
-CREATE INDEX IF NOT EXISTS idx_summaries_level ON summaries(level);
-CREATE INDEX IF NOT EXISTS idx_summaries_parent ON summaries(parent_id);
-
--- Entities
-CREATE INDEX IF NOT EXISTS idx_entities_session ON entities(session_id);
-CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
-CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
-
--- Relations
-CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_entity_id);
-CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity_id);
-CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(relationship);
-
--- Memory Inject
-CREATE INDEX IF NOT EXISTS idx_inject_session ON memory_inject(session_id);
-CREATE INDEX IF NOT EXISTS idx_inject_at ON memory_inject(injected_at);
-
--- Drop Log
-CREATE INDEX IF NOT EXISTS idx_drop_session ON drop_log(session_id);
-CREATE INDEX IF NOT EXISTS idx_drop_at ON drop_log(dropped_at);
-```
+| memory_inject | idx_inject_at | injected_at | Recall ordering |
+| drop_log | idx_drop_session | session_id | Drop audit |
+| drop_log | idx_drop_at | dropped_at | Drop ordering |
+| large_files | idx_large_files_session | session_id | File lookups |
+| large_files | idx_large_files_file_id | file_id | File reference |
+| summary_cache | idx_summary_cache_hash | content_hash | Cache lookup |
 
 ---
 
-## 5. Relationships
-
-### 5.1 Foreign Key Constraints
+## 4. Relationships
 
 ```
 projects
-  └── sessions (1:N)
+  └── sessions (1:N, ON DELETE SET NULL)
 
 sessions
-  ├── messages (1:N)
-  ├── summaries (1:N)
-  ├── entities (1:N)
-  ├── relations (1:N)
-  ├── memory_inject (1:N)
-  └── drop_log (1:N)
+  ├── messages (1:N, ON DELETE CASCADE)
+  ├── summaries (1:N, ON DELETE CASCADE)
+  ├── entities (1:N, ON DELETE CASCADE)
+  ├── relations (1:N, ON DELETE CASCADE)
+  ├── memory_inject (1:N, ON DELETE CASCADE)
+  ├── drop_log (1:N, ON DELETE CASCADE)
+  └── large_files (1:N, ON DELETE CASCADE)
 
 summaries
-  └── summaries (1:N, self-referential for DAG)
-
-entities
-  └── relations (2:N, self-referential)
+  └── summaries (1:N self-referential via parent_summary_id)
 
 messages
-  └── relations (1:N, source_message_id)
+  └── relations (1:N via source_message_id, ON DELETE SET NULL)
 ```
-
-### 5.2 Cascade Rules
-
-| Parent | Child | On Delete |
-|--------|-------|-----------|
-| projects | sessions | CASCADE |
-| sessions | messages | CASCADE |
-| sessions | summaries | CASCADE |
-| sessions | entities | CASCADE |
-| sessions | relations | CASCADE |
-| sessions | memory_inject | CASCADE |
-| sessions | drop_log | CASCADE |
-| summaries | summaries | CASCADE |
-| entities | relations | CASCADE |
-
----
-
-## 6. Migrations
-
-### 6.1 Migration Strategy
-
-- Migrations stored in `src/db/migrations/`
-- Named: `001_initial_schema.sql`, `002_add_entities.sql`, etc.
-- Applied in order on startup
-- Version tracked in `schema_versions` table
-
-### 6.2 Version History
-
-| Version | Description |
-|---------|-------------|
-| 001 | Initial schema |
-| 002 | Entities + Relations |
-| 003 | Memory Inject |
-| 004 | Drop Log |
-| 005 | Config table |
-
----
-
-## 7. Physical Considerations
-
-### 7.1 Page Size
-
-- Default: 4096 bytes
-- Suitable for workload
-
-### 7.2 Cache Size
-
-- Recommended: 64 MB
-- `PRAGMA cache_size = -64000`
-
-### 7.3 WAL Mode
-
-- Enabled for concurrent reads
-- `PRAGMA journal_mode = WAL`
 
 ---
 
 **End of Database Schema Specification**
 
-*Document prepared for Quantum Memory implementation*
+*Updated to reflect actual implementation*

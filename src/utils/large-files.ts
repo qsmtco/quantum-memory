@@ -195,7 +195,7 @@ function parseFileAttributes(raw: string): Record<string, string> {
   
   let match: RegExpExecArray | null;
   while ((match = attrRe.exec(raw)) !== null) {
-    const key = match[1].trim().toLowerCase();
+    const key = (match[1] ?? '').trim().toLowerCase();
     const value = (match[2] ?? match[3] ?? match[4] ?? '').trim();
     if (key.length > 0 && value.length > 0) {
       attrs[key] = value;
@@ -391,7 +391,7 @@ export function summarizeDelimited(content: string, delimiter: ',' | '\t' = ',')
     return 'Structured summary (CSV): no rows found.';
   }
   
-  const headers = lines[0].split(delimiter).map(h => h.trim()).filter(h => h.length > 0);
+  const headers = (lines[0] ?? '').split(delimiter).map(h => h.trim()).filter(h => h.length > 0);
   const rowCount = Math.max(0, lines.length - 1);
   const firstData = lines[1] ? lines[1].substring(0, 180) : '(no data rows)';
   
@@ -411,7 +411,7 @@ export function summarizeXml(content: string): string {
   const rootTag = rootMatch?.[1] ?? 'unknown';
   
   const allTags = [...content.matchAll(/<([A-Za-z0-9_:-]+)(\s|>)/g)]
-    .map(m => m[1])
+    .map(m => m[1]!)
     .filter(tag => tag !== rootTag);
   
   // Deduplicate while preserving order
@@ -439,7 +439,7 @@ export function summarizeYaml(content: string): string {
   
   for (const line of content.split(/\r?\n/)) {
     const match = line.match(/^([A-Za-z0-9_.-]+):\s*(?:#.*)?$/);
-    if (match) topLevelKeys.add(match[1]);
+    if (match) topLevelKeys.add(match[1]!);
   }
   
   const keysArray = Array.from(topLevelKeys).slice(0, 30);
@@ -700,10 +700,14 @@ export function parseFileReference(content: string): { fileId: string; fileName?
   const match = content.match(/\[QM File: (\S+) \| ([^|]+) \| ([^|]+) \|/);
   if (!match) return null;
   
+  const fileId = match[1] ?? '';
+  const fileName = match[2]?.trim() ?? '';
+  const mimeType = match[3]?.trim() ?? '';
+  
   return {
-    fileId: match[1],
-    fileName: match[2].trim(),
-    mimeType: match[3].trim(),
+    fileId,
+    fileName,
+    mimeType,
   };
 }
 

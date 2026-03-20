@@ -42,7 +42,7 @@ describe('RelationStore', () => {
     expect(relation.id).toMatch(/^rel_/);
     expect(relation.fromEntityId).toBe(e1.id);
     expect(relation.toEntityId).toBe(e2.id);
-    expect(relation.relationship).toBe('knows');
+    expect(relation.relation_type).toBe('knows');
     expect(relation.confidence).toBe(1.0);
   });
 
@@ -50,7 +50,7 @@ describe('RelationStore', () => {
     const created = relationStore.create(sessionId, e1.id, e2.id, 'knows');
     const retrieved = relationStore.get(created.id);
     
-    expect(retrieved?.relationship).toBe('knows');
+    expect(retrieved?.relation_type).toBe('knows');
   });
 
   it('should get relations by entity', () => {

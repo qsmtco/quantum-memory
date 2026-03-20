@@ -21,6 +21,8 @@ import { MemoryInjectStore } from '../recall/MemoryInjectStore.js';
 import { AutoRecallInjector } from '../recall/AutoRecallInjector.js';
 import { SmartDropper } from '../drop/SmartDropper.js';
 import { ContextStore } from '../engine/ContextStore.js';
+import { ProjectManager } from '../projects/ProjectManager.js';
+import { LargeFileStore } from './LargeFileStore.js';
 import { extractEntities, estimateTokens } from '../utils/EntityExtractor.js';
 import { LLMCaller } from '../utils/LLMCaller.js';
 import { compileSessionPatterns, matchesSessionPattern } from '../utils/session-patterns.js';
@@ -88,10 +90,23 @@ export class QuantumContextEngine implements ContextEngine {
   private _injector: AutoRecallInjector | null = null;
   private _dropper: SmartDropper | null = null;
   private _ctxStore: ContextStore | null = null;
+  private _projectManager: ProjectManager | null = null;
+  private _largeFileStore: LargeFileStore | null = null;
 
   // LLM caller for summarization
   private _llmCaller: LLMCaller | null = null;
   private _tools: Record<string, any> | null = null;
+
+  // Public accessors for tools and external use
+  getCurrentSessionId(): string { return this._currentSessionId ?? ""; }
+  get searchEngine() { return this._searchEngine; }
+  get entityStore() { return this._entityStore; }
+  get relationStore() { return this._relationStore; }
+  get memoryInjectStore() { return this._injectStore; }
+  get sessionManager() { return this._sessionMgr; }
+  get sessionStore() { return this._sessionMgr; }  // Alias for sessionManager
+  get projectManager() { return this.getProjectManager(); }
+  private _currentSessionId: string | null = null;
 
   // Configuration
   private freshTailCount = 32;
@@ -277,9 +292,18 @@ export class QuantumContextEngine implements ContextEngine {
       }))
     );
 
+    // Detect and track large file references in message content
+    // Uses LLM summarization if available (via getLargeFileStore summarizer)
+    const largeFileStore = this.getLargeFileStore();
+    for (const msg of params.messages) {
+      const text = extractMessageContent(msg);
+      await largeFileStore.processMessage(params.sessionId, text);
+    }
+
     // Extract and store entities from each message
     for (let i = 0; i < params.messages.length; i++) {
       const msg = params.messages[i];
+      if (!msg) continue;
       // Handle complex content types - extract string content
       const text = extractMessageContent(msg);
       
@@ -341,10 +365,22 @@ export class QuantumContextEngine implements ContextEngine {
     isHeartbeat?: boolean;
     tokenBudget?: number;
   }): Promise<void> {
+    // Skip heavy processing for heartbeat runs
+    if (params.isHeartbeat) return;
+
+    // Smart drop: mark low-importance messages as compacted before compaction runs
+    // Drop threshold of 0.3 means messages with importance_score < 0.3 get dropped
+    // Uses LLM scoring if available, keyword fallback otherwise
+    const dropper = this.getDropper();
+    const dropResult = await dropper.drop(params.sessionId, 0.3, false);
+    if (dropResult.dropped > 0) {
+      console.log(`[QuantumMemory] Smart drop: ${dropResult.dropped} messages dropped (reason: ${dropResult.records[0]?.reason ?? 'n/a'})`);
+    }
+
     // Auto-compact if over threshold
     const ctxStore = this.getContextStore();
     const needsCompaction = ctxStore.needsCompaction(
-      params.sessionId, 
+      params.sessionId,
       this.contextThreshold
     );
 
@@ -403,11 +439,13 @@ export class QuantumContextEngine implements ContextEngine {
     }
 
     // Auto-recall: inject relevant memories from past
+    // Uses getter to ensure lazy initialization (getInjector creates the instance)
     let injectionUsed = false;
-    if (this._injector) {
+    const injector = this.getInjector();
+    if (injector) {
       const recentContent = params.messages.slice(-3).map(m => extractMessageContent(m)).join(' ');
       
-      const injection = this._injector.inject(params.sessionId, recentContent, {
+      const injection = injector.inject(params.sessionId, recentContent, {
         maxTokens: Math.floor(budget * 0.1), // Use 10% for memories
       });
 
@@ -666,7 +704,8 @@ ${content}`;
 
   private getDropper(): SmartDropper {
     if (!this._dropper) {
-      this._dropper = new SmartDropper(this.getDb());
+      // Pass LLMCaller for LLM-powered importance scoring; undefined falls back to keyword scoring
+      this._dropper = new SmartDropper(this.getDb(), this._llmCaller ?? undefined);
     }
     return this._dropper;
   }
@@ -681,6 +720,35 @@ ${content}`;
       );
     }
     return this._ctxStore;
+  }
+
+  private getProjectManager(): ProjectManager {
+    if (!this._projectManager) {
+      this._projectManager = new ProjectManager(this.getDb());
+    }
+    return this._projectManager;
+  }
+
+  private getLargeFileStore(): LargeFileStore {
+    if (!this._largeFileStore) {
+      // Create TextSummarizer from LLMCaller if available
+      const summarizer = this._llmCaller
+        ? async (prompt: string): Promise<string | null> => {
+            try {
+              const result = await this._llmCaller!.generate(
+                prompt,
+                'You are a context compression assistant. Provide concise summaries.',
+                { maxTokens: 1000 }
+              );
+              return result.content ?? null;
+            } catch {
+              return null;
+            }
+          }
+        : undefined;
+      this._largeFileStore = new LargeFileStore(this.getDb(), summarizer);
+    }
+    return this._largeFileStore;
   }
 }
 
@@ -705,10 +773,15 @@ ${content}`;
 export function registerQuantumMemory(api: {
   registerContextEngine: (id: string, factory: () => ContextEngine) => void;
   tools?: Record<string, any>;
-}): void {
+}, params?: {
+  onEngineCreated?: (engine: QuantumContextEngine) => void;
+}): QuantumContextEngine {
   console.log('[QuantumMemory] Registering context engine');
   
   const engine = new QuantumContextEngine();
+  
+  // Fire callback after engine is created
+  params?.onEngineCreated?.(engine);
   
   // Enable LLM if tools available
   if (api.tools) {
@@ -716,4 +789,6 @@ export function registerQuantumMemory(api: {
   }
   
   api.registerContextEngine('quantum-memory', () => engine);
+  
+  return engine;
 }

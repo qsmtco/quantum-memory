@@ -228,8 +228,10 @@ export class LLMCaller {
     switch (this.toolName) {
       case 'chat_completion':
         return base;
-      case 'generate':
-        return { prompt: messages[messages.length - 1].content, ...base };
+      case 'generate': {
+        const lastMsg = messages[messages.length - 1];
+        return lastMsg ? { prompt: lastMsg.content, ...base } : base;
+      }
       case 'llm':
       case 'openai':
       default:

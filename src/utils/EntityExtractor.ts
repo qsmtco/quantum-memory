@@ -89,7 +89,9 @@ export function extractEntities(text: string): EntityExtractionResult {
   // 1. Extract tools/technologies (known patterns)
   const toolMatches = Array.from(text.matchAll(KNOWN_TOOLS_PATTERN));
   for (const match of toolMatches) {
-    addEntity(match[1].toLowerCase(), 'tool', 0.9);
+    const toolName = match[1];
+    if (!toolName) continue;
+    addEntity(toolName.toLowerCase(), 'tool', 0.9);
   }
   
   // 2. Extract potential projects (CamelCase and pattern matches)
@@ -118,7 +120,7 @@ export function extractEntities(text: string): EntityExtractionResult {
   // 4. Extract email addresses as persons
   const emails = text.match(/[\w.-]+@[\w.-]+\.\w+/g) || [];
   for (const email of emails) {
-    const name = email.split('@')[0];
+    const name = email.split('@')[0] ?? '';
     addEntity(name, 'person', 0.8);
   }
   
@@ -127,6 +129,7 @@ export function extractEntities(text: string): EntityExtractionResult {
     const matches = Array.from(text.matchAll(pattern));
     for (const match of matches) {
       const [, from, to] = match;
+      if (!from || !to) continue;
       // Check if from/to are in our entities
       const fromKey = from.toLowerCase();
       const toKey = to.toLowerCase();
@@ -137,7 +140,7 @@ export function extractEntities(text: string): EntityExtractionResult {
           from: from,
           to: to,
           type: relation,
-          sourceText: match[0],
+          sourceText: match[0] ?? '',
         });
       }
     }
