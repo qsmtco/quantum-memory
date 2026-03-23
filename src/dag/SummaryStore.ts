@@ -36,8 +36,8 @@ export class SummaryStore {
     const tokenCount = estimateTokens(content);
     
     this.db.run(
-      `INSERT INTO summaries (id, session_id, parent_summary_id, level, content, source_message_ids, is_deterministic, token_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO summaries (id, session_id, parent_summary_id, level, content, source_message_ids, model_used, is_deterministic, token_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         sessionId,
@@ -45,6 +45,7 @@ export class SummaryStore {
         level,
         content,
         JSON.stringify(options.sourceMessageIds || []),
+        options.modelUsed || null,
         options.isDeterministic ? 1 : 0,
         tokenCount,
         now,
@@ -227,7 +228,7 @@ export class SummaryStore {
       sourceSummaryIds: [],
       tokens: row.token_count,
       createdAt: row.created_at,
-      modelUsed: undefined,
+      modelUsed: row.model_used || undefined,
       isDeterministic: row.is_deterministic === 1,
     };
   }
