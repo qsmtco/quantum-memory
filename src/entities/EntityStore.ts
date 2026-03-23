@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { validateSessionId, validateEntityName, validateEntityType } from '../utils/validators.js';
 
 export interface Entity {
   id: string;
@@ -21,6 +22,10 @@ export class EntityStore {
    * Create or update an entity (upsert)
    */
   upsert(sessionId: string, name: string, type: string, metadata?: Record<string, unknown>): Entity {
+    validateSessionId(sessionId);
+    validateEntityName(name);
+    validateEntityType(type);
+
     const existing = this.findByName(sessionId, name, type);
     const now = new Date().toISOString();
     

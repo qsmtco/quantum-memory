@@ -40,7 +40,7 @@ The result: your agent gets the right memories, in the right form, at the right 
 | **Large File Handling** | 🔶 Partial | Detects and tracks file references in messages. LLM summarization wired. |
 | **SQLite Persistence** | ✅ Done | better-sqlite3 in WAL mode. Synchronous, zero-latency, zero cloud dependency. |
 | **Session Management** | ✅ Done | Create/complete/archive sessions with metadata. Multiple projects per session. |
-| **Plugin Tools (MCP)** | ✅ Done | 5 tools: `qm_search`, `qm_entities`, `qm_relations`, `qm_recall`, `qm_projects`. |
+| **Plugin Tools (MCP)** | ✅ Done | 6 tools: `qm_search`, `qm_entities`, `qm_relations`, `qm_recall`, `qm_projects`, `qm_lineage`. |
 
 ---
 
@@ -232,9 +232,12 @@ src/
 │   ├── ContextStore.ts       # Context assembly: DAG traversal + fresh tail
 │   ├── LargeFileStore.ts     # Large file metadata + LLM summarization
 │   ├── MessageStore.ts       # Message CRUD with importance scoring
-│   └── SessionManager.ts     # Session lifecycle
+│   ├── SessionManager.ts     # Session lifecycle
+│   ├── KeywordCompactor.ts   # Phase 2: Entity/decision/topic extraction compactor
+│   └── DeterministicDropper.ts # Phase 2: Guaranteed-convergence compaction
 ├── dag/
-│   └── SummaryStore.ts       # DAG node CRUD + level-based traversal
+│   ├── SummaryStore.ts       # DAG node CRUD + level-based traversal
+│   └── LineageTraverser.ts   # Phase 3: DAG traversal (lineage, descendants, tree)
 ├── entities/
 │   ├── EntityStore.ts       # Named entity CRUD + mention tracking
 │   └── RelationStore.ts     # Knowledge graph edges with confidence
@@ -245,6 +248,9 @@ src/
 │   └── MemoryInjectStore.ts # Recall cache
 ├── drop/
 │   └── SmartDropper.ts       # LLM scoring + threshold-based pruning
+├── trim/
+│   ├── Trimmer.ts           # Phase 1: Structurally lossless trimming
+│   └── types.ts             # Trim options, metrics, result types
 ├── projects/
 │   └── ProjectManager.ts     # Project CRUD
 ├── tools/                    # MCP tool implementations
@@ -252,7 +258,8 @@ src/
 │   ├── qm-entities-tool.ts
 │   ├── qm-relations-tool.ts
 │   ├── qm-recall-tool.ts
-│   └── qm-projects-tool.ts
+│   ├── qm-projects-tool.ts
+│   └── qm-lineage-tool.ts    # Phase 3: DAG traversal tool
 ├── db/
 │   ├── Database.ts           # SQLite connection, WAL mode, inline schema
 │   └── migrations/           # Migration system
@@ -300,7 +307,7 @@ npm run build     # Compile
 - **Auto-recall**: ✅ Fully wired — `assemble()` calls `AutoRecallInjector.inject()` on every context build.
 - **FTS5 search**: ✅ `SearchEngine.searchAll()` uses FTS5 MATCH with BM25 ranking, LIKE fallback.
 - **Smart drop**: ✅ `afterTurn()` calls `getDropper().drop()`. LLM scoring when available, keyword fallback otherwise.
-- **Plugin tools**: ✅ All 5 tools registered and functional.
+- **Plugin tools**: ✅ All 6 tools registered and functional: qm_search, qm_entities, qm_relations, qm_recall, qm_projects, qm_lineage.
 
 ---
 

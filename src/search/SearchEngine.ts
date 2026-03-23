@@ -1,3 +1,5 @@
+import { escapeLikePattern } from '../utils/validators.js';
+
 export interface SearchResult {
   id: string;
   sessionId: string;
@@ -36,7 +38,7 @@ export class SearchEngine {
       ? `SELECT id, session_id, content, role FROM messages WHERE session_id = ? AND content LIKE ?`
       : `SELECT id, session_id, content, role FROM messages WHERE session_id = ? AND content LIKE ? AND is_compacted = 0`;
     
-    const params: any[] = [sessionId, `%${query}%`];
+    const params: any[] = [sessionId, `%${escapeLikePattern(query)}%`];
     
     // Date range filtering (SH-004)
     if (options?.dateFrom) {
@@ -120,7 +122,7 @@ export class SearchEngine {
     const limit = options?.limit ?? 20;
     
     let sql = `SELECT id, session_id, content, role FROM messages WHERE content LIKE ?`;
-    const params: any[] = [`%${query}%`];
+    const params: any[] = [`%${escapeLikePattern(query)}%`];
     
     if (options?.sessionIds && options.sessionIds.length > 0) {
       const placeholders = options.sessionIds.map(() => '?').join(',');
@@ -147,7 +149,7 @@ export class SearchEngine {
   }> {
     const rows = this.db.query(
       `SELECT id, name, type, mention_count FROM entities WHERE session_id = ? AND name LIKE ? ORDER BY mention_count DESC LIMIT 10`,
-      [sessionId, `%${query}%`]
+      [sessionId, `%${escapeLikePattern(query)}%`]
     );
     
     return rows.map((row: any) => ({

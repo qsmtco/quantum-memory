@@ -31,6 +31,7 @@ import { Trimmer } from '../trim/Trimmer.js';
 import { KeywordCompactor } from './KeywordCompactor.js';
 import { DeterministicDropper } from './DeterministicDropper.js';
 import { LineageTraverser } from '../dag/LineageTraverser.js';
+import { validateSessionId, validateMessageContent, assertNonEmptyArray } from '../utils/validators.js';
 
 /**
  * Extract text content from an AgentMessage, handling various message types
@@ -200,8 +201,9 @@ export class QuantumContextEngine implements ContextEngine {
     sessionKey?: string;
     sessionFile: string;
   }): Promise<BootstrapResult> {
+    validateSessionId(params.sessionId);
     console.log('[QuantumMemory] Bootstrap:', params.sessionId);
-    
+
     // Get database connection
     const db = this.getDb();
     
@@ -285,6 +287,17 @@ export class QuantumContextEngine implements ContextEngine {
     messages: AgentMessage[];
     isHeartbeat?: boolean;
   }): Promise<IngestBatchResult> {
+    validateSessionId(params.sessionId);
+    assertNonEmptyArray(params.messages, 'messages');
+
+    // Validate all message contents early
+    for (let i = 0; i < params.messages.length; i++) {
+      const content = (params.messages[i] as any).content;
+      if (content !== undefined) {
+        validateMessageContent(content);
+      }
+    }
+
     // Check if session should be ignored entirely
     if (this.isIgnoredSession(params.sessionKey)) {
       console.log('[QuantumMemory] Skipping ignored session:', params.sessionKey);

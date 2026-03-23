@@ -82,6 +82,22 @@
     "smartDropEnabled": {
       "label": "Enable Smart Drop",
       "help": "Automatically drop low-value content"
+    },
+    "trimEnabled": {
+      "label": "Enable Trimming",
+      "help": "Trim messages before compaction (20-86% token reduction, structurally lossless)"
+    },
+    "trimStubThreshold": {
+      "label": "Stub Threshold",
+      "help": "Character threshold for stubbing tool results (default: 500)"
+    },
+    "trimStripBase64": {
+      "label": "Strip Base64 Images",
+      "help": "Remove base64-encoded images from content"
+    },
+    "trimStripThinkingBlocks": {
+      "label": "Strip Thinking Blocks",
+      "help": "Remove thinking/reasoning blocks with non-portable signatures"
     }
   },
   "configSchema": {
@@ -174,6 +190,27 @@
         "type": "boolean",
         "default": true,
         "description": "Enable smart dropping"
+      },
+      "trimEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable structurally lossless trimming before compaction (20-86% token reduction)"
+      },
+      "trimStubThreshold": {
+        "type": "number",
+        "default": 500,
+        "minimum": 50,
+        "description": "Character threshold for stubbing tool results (default: 500)"
+      },
+      "trimStripBase64": {
+        "type": "boolean",
+        "default": true,
+        "description": "Strip base64-encoded images from content"
+      },
+      "trimStripThinkingBlocks": {
+        "type": "boolean",
+        "default": true,
+        "description": "Strip thinking/reasoning blocks (non-portable signatures)"
       }
     }
   },

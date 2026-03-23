@@ -51,15 +51,24 @@ describe('Config Utils', () => {
   });
 
   describe('validateQuantumConfig', () => {
+    // Default trimmer config for tests
+    const defaultTrimmer = {
+      trimEnabled: true,
+      trimStubThreshold: 500,
+      trimStripBase64: true,
+      trimStripThinkingBlocks: true,
+    };
+
     it('should return no errors for valid config', () => {
       const config = {
         freshTailCount: 32,
         contextThreshold: 0.75,
         leafChunkTokens: 20000,
         leafTargetTokens: 1200,
+        trimmer: defaultTrimmer,
       };
       
-      const errors = validateQuantumConfig(config);
+      const errors = validateQuantumConfig(config as any);
       expect(errors).toHaveLength(0);
     });
 
@@ -67,9 +76,10 @@ describe('Config Utils', () => {
       const config = {
         freshTailCount: -1,
         contextThreshold: 0.75,
+        trimmer: defaultTrimmer,
       };
       
-      const errors = validateQuantumConfig(config);
+      const errors = validateQuantumConfig(config as any);
       expect(errors).toContain('freshTailCount must be >= 0');
     });
 
@@ -77,9 +87,10 @@ describe('Config Utils', () => {
       const config = {
         freshTailCount: 32,
         contextThreshold: 1.5,
+        trimmer: defaultTrimmer,
       };
       
-      const errors = validateQuantumConfig(config);
+      const errors = validateQuantumConfig(config as any);
       expect(errors).toContain('contextThreshold must be between 0 and 1');
     });
 
@@ -88,9 +99,10 @@ describe('Config Utils', () => {
         freshTailCount: 32,
         contextThreshold: 0.75,
         leafChunkTokens: 500,
+        trimmer: defaultTrimmer,
       };
       
-      const errors = validateQuantumConfig(config);
+      const errors = validateQuantumConfig(config as any);
       expect(errors).toContain('leafChunkTokens must be >= 1000');
     });
 
@@ -100,14 +112,46 @@ describe('Config Utils', () => {
         contextThreshold: 1.5,
         leafChunkTokens: 500,
         leafTargetTokens: 50,
+        trimmer: defaultTrimmer,
       };
       
-      const errors = validateQuantumConfig(config);
+      const errors = validateQuantumConfig(config as any);
       expect(errors.length).toBeGreaterThan(1);
       expect(errors).toContain('freshTailCount must be >= 0');
       expect(errors).toContain('contextThreshold must be between 0 and 1');
       expect(errors).toContain('leafChunkTokens must be >= 1000');
       expect(errors).toContain('leafTargetTokens must be >= 100');
+    });
+
+    // Phase 1.5: Test trimmer config validation
+    it('should detect invalid trimStubThreshold', () => {
+      const config = {
+        freshTailCount: 32,
+        contextThreshold: 0.75,
+        trimmer: {
+          ...defaultTrimmer,
+          trimStubThreshold: 10,  // Too low
+        },
+      };
+      
+      const errors = validateQuantumConfig(config as any);
+      expect(errors).toContain('trimmer.trimStubThreshold must be >= 50');
+    });
+
+    it('should accept valid trimmer config', () => {
+      const config = {
+        freshTailCount: 32,
+        contextThreshold: 0.75,
+        trimmer: {
+          trimEnabled: false,
+          trimStubThreshold: 1000,
+          trimStripBase64: false,
+          trimStripThinkingBlocks: false,
+        },
+      };
+      
+      const errors = validateQuantumConfig(config as any);
+      expect(errors).toHaveLength(0);
     });
   });
 });

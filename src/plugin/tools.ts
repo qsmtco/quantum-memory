@@ -16,6 +16,7 @@ import { createQmEntitiesTool } from "../tools/qm-entities-tool.js";
 import { createQmRelationsTool } from "../tools/qm-relations-tool.js";
 import { createQmRecallTool } from "../tools/qm-recall-tool.js";
 import { createQmProjectsTool } from "../tools/qm-projects-tool.js";
+import { createQmLineageTool } from "../tools/qm-lineage-tool.js";
 
 /**
  * Wraps a QM tool factory result into an OpenClaw-compatible AgentTool.
@@ -60,6 +61,7 @@ export function registerQmTools(api: OpenClawPluginApi, deps: {
   memoryInjectStore: any;
   sessionStore: any;
   projectManager: any;
+  lineageTraverser: any;  // Phase 3.3: For qm_lineage tool
 }): void {
   const tools: AnyAgentTool[] = [
     adaptTool(createQmSearchTool({
@@ -74,12 +76,18 @@ export function registerQmTools(api: OpenClawPluginApi, deps: {
       relationStore: deps.relationStore,
       sessionIdGetter: deps.sessionIdGetter,
     })),
+    // Phase 0.2 fix: qm_recall now uses SearchEngine, not MemoryInjectStore
     adaptTool(createQmRecallTool({
-      memoryInjectStore: deps.memoryInjectStore,
+      searchEngine: deps.searchEngine,
       sessionIdGetter: deps.sessionIdGetter,
     })),
     adaptTool(createQmProjectsTool({
       projectManager: deps.projectManager,
+    })),
+    // Phase 3.3: qm_lineage tool for DAG traversal
+    adaptTool(createQmLineageTool({
+      lineageTraverser: deps.lineageTraverser,
+      sessionIdGetter: deps.sessionIdGetter,
     })),
   ];
 

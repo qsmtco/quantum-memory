@@ -16,10 +16,26 @@ export interface AssembleResult {
   systemPromptAddition?: string;
 }
 
+/**
+ * Phase 2.1: Compaction escalation level
+ * - llm: Full LLM summarization (highest quality, requires LLM)
+ * - keyword: Extract entities/decisions/topics (no LLM needed)
+ * - deterministic: Drop oldest messages beyond threshold (guaranteed convergence)
+ */
+export type CompactionLevel = 'llm' | 'keyword' | 'deterministic';
+
 export interface CompactResult {
   ok: boolean;
   compacted: boolean;
   reason?: string;
+  /** Phase 2.1: Which compaction level was used */
+  level?: CompactionLevel;
+  /** Phase 2.1: Number of messages compacted */
+  messagesCompacted?: number;
+  /** Phase 2.1: Token reduction achieved */
+  tokenReduction?: number;
+  /** Phase 2.4: Summary node ID created */
+  summaryId?: string;
   result?: {
     summary?: string;
     firstKeptEntryId?: string;
