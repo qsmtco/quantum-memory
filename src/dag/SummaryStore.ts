@@ -12,6 +12,8 @@ export interface Summary {
   tokens: number;
   createdAt: string;
   modelUsed?: string;
+  /** True if this summary was created by deterministic drop (no LLM/keywords) */
+  isDeterministic?: boolean;
 }
 
 /**
@@ -27,14 +29,15 @@ export class SummaryStore {
     parentId?: string;
     sourceMessageIds?: string[];
     modelUsed?: string;
+    isDeterministic?: boolean;
   } = {}): Summary {
     const id = `sum_${randomUUID().slice(0, 12)}`;
     const now = new Date().toISOString();
     const tokenCount = estimateTokens(content);
     
     this.db.run(
-      `INSERT INTO summaries (id, session_id, parent_summary_id, level, content, source_message_ids, token_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO summaries (id, session_id, parent_summary_id, level, content, source_message_ids, is_deterministic, token_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         sessionId,
@@ -42,6 +45,7 @@ export class SummaryStore {
         level,
         content,
         JSON.stringify(options.sourceMessageIds || []),
+        options.isDeterministic ? 1 : 0,
         tokenCount,
         now,
       ]
@@ -58,6 +62,7 @@ export class SummaryStore {
       tokens: tokenCount,
       createdAt: now,
       modelUsed: options.modelUsed,
+      isDeterministic: options.isDeterministic,
     };
   }
 
@@ -113,23 +118,18 @@ export class SummaryStore {
 
   /**
    * Get the latest summary at each level
+   * Uses a single correlated subquery to find the most recent summary per level.
    */
   getLatestByLevel(sessionId: string): Summary[] {
     const rows = this.db.query(
       `SELECT * FROM summaries s1
        WHERE s1.session_id = ?
-       AND s1.created_at = (
-         SELECT MAX(s2.created_at)
+       AND s1.id = (
+         SELECT s2.id
          FROM summaries s2
          WHERE s2.session_id = s1.session_id
          AND s2.level = s1.level
-       )
-       AND s1.id = (
-         SELECT s3.id FROM summaries s3
-         WHERE s3.session_id = s1.session_id
-         AND s3.level = s1.level
-         AND s3.created_at = s1.created_at
-         ORDER BY s3.id DESC
+         ORDER BY s2.created_at DESC, s2.id DESC
          LIMIT 1
        )
        ORDER BY s1.level ASC`,
@@ -228,6 +228,7 @@ export class SummaryStore {
       tokens: row.token_count,
       createdAt: row.created_at,
       modelUsed: undefined,
+      isDeterministic: row.is_deterministic === 1,
     };
   }
 }

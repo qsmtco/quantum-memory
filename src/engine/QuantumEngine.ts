@@ -412,10 +412,10 @@ export class QuantumContextEngine implements ContextEngine {
     if (params.isHeartbeat) return;
 
     // Smart drop: mark low-importance messages as compacted before compaction runs
-    // Drop threshold of 0.3 means messages with importance_score < 0.3 get dropped
+    // Drop threshold from config: messages with importance_score < threshold get dropped
     // Uses LLM scoring if available, keyword fallback otherwise
     const dropper = this.getDropper();
-    const dropResult = await dropper.drop(params.sessionId, 0.3, false);
+    const dropResult = await dropper.drop(params.sessionId, this.dropThreshold, false);
     if (dropResult.dropped > 0) {
       console.log(`[QuantumMemory] Smart drop: ${dropResult.dropped} messages dropped (reason: ${dropResult.records[0]?.reason ?? 'n/a'})`);
     }
@@ -588,7 +588,7 @@ export class QuantumContextEngine implements ContextEngine {
         console.error('[QuantumMemory] LLM compaction error:', error);
       }
     } else {
-      console.warn('[QuantumMemory] LLM not available, skipping to keyword compaction');
+      console.warn('[QuantumMemory] LLM not available for compaction — using keyword extraction fallback (lower quality summaries)');
     }
     
     // Level 2: Keyword-based compaction (no LLM needed)
@@ -599,12 +599,13 @@ export class QuantumContextEngine implements ContextEngine {
         console.log(`[QuantumMemory] Compaction succeeded at level 'keyword': ${result.messagesCompacted} messages, ${result.tokenReduction} tokens reduced`);
         return result;
       }
-      console.warn(`[QuantumMemory] Keyword compaction insufficient, escalating...`);
+      console.warn(`[QuantumMemory] Keyword compaction insufficient, escalating to deterministic drop (no LLM, no keywords — just removal)`);
     } catch (error) {
       console.error('[QuantumMemory] Keyword compaction error:', error);
     }
     
     // Level 3: Deterministic drop (guaranteed convergence)
+    console.warn('[QuantumMemory] Using deterministic drop — oldest messages will be removed without summarization');
     try {
       const result = this.deterministicDrop(params.sessionId, currentTokens, threshold, summaryStore, msgStore);
       result.level = 'deterministic';

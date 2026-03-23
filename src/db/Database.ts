@@ -115,9 +115,17 @@ export class QuantumDatabase {
         content TEXT NOT NULL,
         token_count INTEGER,
         source_message_ids TEXT,
+        is_deterministic INTEGER DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `);
+    
+    // Runtime migration: add is_deterministic column if it doesn't exist (for existing databases)
+    try {
+      this.db.exec(`ALTER TABLE summaries ADD COLUMN is_deterministic INTEGER DEFAULT 0`);
+    } catch {
+      // Column already exists, ignore
+    }
 
     // Entities table (schema v1)
     this.db.exec(`

@@ -95,14 +95,12 @@ export class ContextStore {
 
   /**
    * Get summaries ordered oldest -> newest (for context assembly)
+   * Uses getLatestByLevel to get the most recent summary at each DAG level.
    */
   private getSummariesOrdered(sessionId: string): Array<{ content: string; tokens: number }> {
-    const summaries = this.summaryStore.getBySession(sessionId);
-    
-    // Group by level and get latest at each level
+    // Get latest summary at each level, then sort by level (oldest first)
     const latestByLevel = this.summaryStore.getLatestByLevel(sessionId);
     
-    // Return in order: lower levels first (older), then higher levels
     return latestByLevel
       .sort((a, b) => a.level - b.level)
       .map(s => ({ content: s.content, tokens: s.tokens }));
