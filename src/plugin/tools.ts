@@ -17,6 +17,7 @@ import { createQmRelationsTool } from "../tools/qm-relations-tool.js";
 import { createQmRecallTool } from "../tools/qm-recall-tool.js";
 import { createQmProjectsTool } from "../tools/qm-projects-tool.js";
 import { createQmLineageTool } from "../tools/qm-lineage-tool.js";
+import { createQmFileLookupTool } from "../tools/qm-file-lookup-tool.js";
 
 /**
  * Wraps a QM tool factory result into an OpenClaw-compatible AgentTool.
@@ -62,6 +63,7 @@ export function registerQmTools(api: OpenClawPluginApi, deps: {
   sessionStore: any;
   projectManager: any;
   lineageTraverser: any;  // Phase 3.3: For qm_lineage tool
+  getFile: (fileId: string) => Promise<any>;  // For qm_file_lookup tool
 }): void {
   const tools: AnyAgentTool[] = [
     adaptTool(createQmSearchTool({
@@ -88,6 +90,10 @@ export function registerQmTools(api: OpenClawPluginApi, deps: {
     adaptTool(createQmLineageTool({
       lineageTraverser: deps.lineageTraverser,
       sessionIdGetter: deps.sessionIdGetter,
+    })),
+    // Large file lookup: expand [QM File: ...|STUB] references
+    adaptTool(createQmFileLookupTool({
+      getFile: deps.getFile,
     })),
   ];
 

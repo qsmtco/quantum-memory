@@ -271,9 +271,20 @@ export class Trimmer {
   }
 
   /**
-   * Create stub placeholder for large content
+   * Create stub placeholder for large content.
+   * Preserves [QM File: ...] file references so files can still be looked up.
    */
   private stubContent(content: string): string {
+    // Check for [QM File: fileId|filename|mimeType|size] pattern
+    const fileMatch = content.match(/\[QM File: ([^\]|]+)\|([^\]|]*)\|([^\]|]*)\|([^\]|]*)/);
+    if (fileMatch && fileMatch[1]) {
+      const fileId = fileMatch[1].trim();
+      const fileName = fileMatch[2]?.trim() ?? '';
+      const mimeType = fileMatch[3]?.trim() ?? '';
+      const size = fileMatch[4]?.trim() ?? '';
+      return `[QM File: ${fileId}|${fileName}|${mimeType}|${size}|STUB]`;
+    }
+    // Default stub for non-file content
     const charCount = content.length;
     const lines = content.split('\n').length;
     return `[Trimmed: ~${charCount} chars, ${lines} lines]`;

@@ -249,6 +249,33 @@ export class QuantumContextEngine implements ContextEngine {
   }
 
   /**
+   * Look up a large file by its file ID.
+   * Returns file metadata and summary, or null if not found.
+   * 
+   * Use this to expand [QM File: ...|STUB] references in trimmed messages.
+   */
+  async getFile(fileId: string): Promise<{
+    fileId: string;
+    fileName?: string;
+    mimeType?: string;
+    byteSize: number;
+    tokenCount: number;
+    summary: string;
+  } | null> {
+    const store = this.getLargeFileStore();
+    const record = await store.getFile(fileId);
+    if (!record) return null;
+    return {
+      fileId: record.fileId,
+      fileName: record.fileName,
+      mimeType: record.mimeType,
+      byteSize: record.byteSize,
+      tokenCount: record.tokenCount,
+      summary: record.summary,
+    };
+  }
+
+  /**
    * Ingest a single message into the store
    * 
    * Stores the message and extracts entities from it.
@@ -780,6 +807,21 @@ ${content}`;
    */
   async dispose(): Promise<void> {
     console.log('[QuantumMemory] Disposing');
+
+    // Reset all lazy stores so they are recreated fresh on next use
+    this._msgStore = null;
+    this._summaryStore = null;
+    this._entityStore = null;
+    this._relationStore = null;
+    this._searchEngine = null;
+    this._injectStore = null;
+    this._injector = null;
+    this._dropper = null;
+    this._ctxStore = null;
+    this._largeFileStore = null;
+    this._trimmer = null;
+    this._lineageTraverser = null;
+
     closeDatabase();
   }
 
