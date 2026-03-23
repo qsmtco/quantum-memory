@@ -2,7 +2,7 @@
 ## Context Engine Plugin Integration
 
 **Project:** Quantum Memory V2  
-**Location:** `/home/q/.openclaw/workspace-Qaster/projects/quantum-memory-V2/`  
+**Location:** `/home/q/.openclaw/workspace-Qaster/projects/quantum-memory/`  
 **Goal:** Transform Quantum Memory into a proper OpenClaw context-engine plugin (lossless-claw replacement)
 
 ---
