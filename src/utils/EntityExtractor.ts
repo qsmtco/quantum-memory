@@ -1,4 +1,8 @@
 import { randomUUID } from 'crypto';
+import { estimateTokens } from '../trim/types.js';
+
+// Re-export estimateTokens so existing importers (large-files.ts, QuantumEngine.ts) don't break
+export { estimateTokens };
 
 /**
  * Entity types supported by Quantum Memory
@@ -150,11 +154,4 @@ export function extractEntities(text: string): EntityExtractionResult {
   const uniqueEntities = Array.from(seen.values());
   
   return { entities: uniqueEntities, relations };
-}
-
-/**
- * Estimate token count (rough: ~4 chars per token)
- */
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
 }

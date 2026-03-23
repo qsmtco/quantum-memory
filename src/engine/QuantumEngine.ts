@@ -10,6 +10,7 @@ import type {
   SubagentSpawnPreparation, 
   AgentMessage 
 } from '../types/context-engine.js';
+import { resolveQuantumConfig, type QuantumConfig } from '../utils/config.js';
 import { getDatabase, closeDatabase } from '../db/Database.js';
 import { SessionManager } from '../engine/SessionManager.js';
 import { MessageStore } from '../engine/MessageStore.js';
@@ -26,6 +27,10 @@ import { LargeFileStore } from './LargeFileStore.js';
 import { extractEntities, estimateTokens } from '../utils/EntityExtractor.js';
 import { LLMCaller } from '../utils/LLMCaller.js';
 import { compileSessionPatterns, matchesSessionPattern } from '../utils/session-patterns.js';
+import { Trimmer } from '../trim/Trimmer.js';
+import { KeywordCompactor } from './KeywordCompactor.js';
+import { DeterministicDropper } from './DeterministicDropper.js';
+import { LineageTraverser } from '../dag/LineageTraverser.js';
 
 /**
  * Extract text content from an AgentMessage, handling various message types
@@ -78,6 +83,19 @@ export class QuantumContextEngine implements ContextEngine {
     ownsCompaction: true,
   };
 
+  constructor(openclawConfig?: any) {
+    // Load config from openclaw plugin config, with defaults
+    this._config = resolveQuantumConfig(openclawConfig ?? {});
+    this.freshTailCount = this._config.freshTailCount;
+    this.contextThreshold = this._config.contextThreshold;
+    this.contextWindow = this._config.contextWindow;
+    this.dropThreshold = this._config.dropThreshold;
+    this.maxRecallTokens = this._config.maxRecallTokens;
+    this.trimStubThreshold = this._config.trimmer.trimStubThreshold;
+    this.trimStripBase64 = this._config.trimmer.trimStripBase64;
+    this.trimStripThinkingBlocks = this._config.trimmer.trimStripThinkingBlocks;
+  }
+
   // Core stores - initialized lazily
   private _db: any = null;
   private _sessionMgr: SessionManager | null = null;
@@ -92,6 +110,8 @@ export class QuantumContextEngine implements ContextEngine {
   private _ctxStore: ContextStore | null = null;
   private _projectManager: ProjectManager | null = null;
   private _largeFileStore: LargeFileStore | null = null;
+  private _trimmer: Trimmer | null = null;
+  private _lineageTraverser: LineageTraverser | null = null;
 
   // LLM caller for summarization
   private _llmCaller: LLMCaller | null = null;
@@ -102,15 +122,25 @@ export class QuantumContextEngine implements ContextEngine {
   get searchEngine() { return this._searchEngine; }
   get entityStore() { return this._entityStore; }
   get relationStore() { return this._relationStore; }
+  get messageStore() { return this.getMessageStore(); }  // Phase 3.3: For LineageTraverser
+  get summaryStore() { return this.getSummaryStore(); }  // Phase 3.3: For LineageTraverser
+  get lineageTraverser() { return this.getLineageTraverser(); }  // Phase 4: For AutoRecallInjector + qm_lineage tool
   get memoryInjectStore() { return this._injectStore; }
   get sessionManager() { return this._sessionMgr; }
   get sessionStore() { return this._sessionMgr; }  // Alias for sessionManager
   get projectManager() { return this.getProjectManager(); }
   private _currentSessionId: string | null = null;
 
-  // Configuration
-  private freshTailCount = 32;
-  private contextThreshold = 0.75;
+  // Configuration — loaded from QuantumConfig, defaults in config.ts
+  private _config: QuantumConfig;
+  private freshTailCount: number;
+  private contextThreshold: number;
+  private contextWindow: number;
+  private dropThreshold: number;
+  private maxRecallTokens: number;
+  private trimStubThreshold: number;
+  private trimStripBase64: boolean;
+  private trimStripThinkingBlocks: boolean;
   
   // Session pattern matching
   private ignoreSessionPatterns: RegExp[] = [];
@@ -523,27 +553,89 @@ export class QuantumContextEngine implements ContextEngine {
       };
     }
 
-    // Check if LLM available
-    if (!this._llmCaller?.isAvailable()) {
-      console.warn('[QuantumMemory] No LLM available for summarization');
+    // Phase 0.3: Log LLM status at compaction time for diagnostics
+    console.log('[QuantumMemory] Compact: LLM available:', this._llmCaller?.isAvailable() ?? false);
+    console.log('[QuantumMemory] Compact: LLM tool:', this._llmCaller?.getToolName() ?? '(none)');
+    console.log('[QuantumMemory] Compact: Messages to summarize:', toSummarize.length);
+
+    // Phase 2.4: Three-level escalation: LLM → keyword → deterministic
+    const minTokenReduction = 100;  // Minimum reduction to consider successful
+    
+    // Level 1: LLM summarization (highest quality)
+    if (this._llmCaller?.isAvailable()) {
+      try {
+        const result = await this.llmCompaction(params, toSummarize, currentTokens, summaryStore, msgStore, ctxStore);
+        if (result.ok && result.compacted && (result.tokenReduction ?? 0) >= minTokenReduction) {
+          result.level = 'llm';
+          console.log(`[QuantumMemory] Compaction succeeded at level 'llm': ${result.messagesCompacted} messages, ${result.tokenReduction} tokens reduced`);
+          return result;
+        }
+        console.warn(`[QuantumMemory] LLM compaction insufficient or failed, escalating...`);
+      } catch (error) {
+        console.error('[QuantumMemory] LLM compaction error:', error);
+      }
+    } else {
+      console.warn('[QuantumMemory] LLM not available, skipping to keyword compaction');
+    }
+    
+    // Level 2: Keyword-based compaction (no LLM needed)
+    try {
+      const result = this.keywordCompaction(params.sessionId, toSummarize, currentTokens, summaryStore, msgStore);
+      if (result.ok && result.compacted && (result.tokenReduction ?? 0) >= minTokenReduction) {
+        result.level = 'keyword';
+        console.log(`[QuantumMemory] Compaction succeeded at level 'keyword': ${result.messagesCompacted} messages, ${result.tokenReduction} tokens reduced`);
+        return result;
+      }
+      console.warn(`[QuantumMemory] Keyword compaction insufficient, escalating...`);
+    } catch (error) {
+      console.error('[QuantumMemory] Keyword compaction error:', error);
+    }
+    
+    // Level 3: Deterministic drop (guaranteed convergence)
+    try {
+      const result = this.deterministicDrop(params.sessionId, currentTokens, threshold, summaryStore, msgStore);
+      result.level = 'deterministic';
+      if (result.compacted) {
+        console.log(`[QuantumMemory] Compaction succeeded at level 'deterministic': ${result.messagesCompacted} messages, ${result.tokenReduction} tokens reduced`);
+      }
+      return result;
+    } catch (error) {
+      console.error('[QuantumMemory] Deterministic drop error:', error);
       return {
         ok: false,
         compacted: false,
-        reason: 'LLM not available',
+        reason: `All compaction levels failed: ${error}`,
       };
     }
+  }
 
-    try {
-      // Build content to summarize
-      const content = toSummarize.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n\n---\n\n');
-      
-      // Determine current DAG level
-      const currentLevel = summaryStore.getMaxLevel(params.sessionId) + 1;
+  /**
+   * Level 1: LLM-based summarization
+   * Phase 2.4: Extracted from original compact() for escalation pattern
+   */
+  private async llmCompaction(
+    params: any,
+    toSummarize: any[],
+    currentTokens: number,
+    summaryStore: SummaryStore,
+    msgStore: MessageStore,
+    ctxStore: ContextStore
+  ): Promise<CompactResult> {
+    // Phase 1.4: Trim messages before summarization
+    const trimmer = this.getTrimmer();
+    const trimResult = trimmer.trim(toSummarize as any[]);
+    
+    if (trimResult.metrics.reductionPercent > 0) {
+      console.log(`[QuantumMemory] Trimmed ${trimResult.metrics.reductionPercent.toFixed(1)}%: ` +
+        `${trimResult.metrics.tokenEstimateBefore} → ${trimResult.metrics.tokenEstimateAfter} tokens`);
+    }
+    
+    const content = trimResult.messages.map(m => m.content).join('\n\n---\n\n');
+    const currentLevel = summaryStore.getMaxLevel(params.sessionId) + 1;
 
-      // Create summary prompt
-      const summaryPrompt = params.customInstructions 
-        ? `${params.customInstructions}\n\nSummarize this conversation:\n\n${content}`
-        : `Summarize this conversation concisely while preserving:
+    const summaryPrompt = params.customInstructions 
+      ? `${params.customInstructions}\n\nSummarize this conversation:\n\n${content}`
+      : `Summarize this conversation concisely while preserving:
 - Key decisions and conclusions
 - Important names, projects, and tools
 - Technical details needed to continue
@@ -552,50 +644,94 @@ export class QuantumContextEngine implements ContextEngine {
 Conversation:
 ${content}`;
 
-      // Call LLM for summarization
-      const summaryResponse = await this._llmCaller!.generate(
-        summaryPrompt,
-        'You are a helpful assistant that creates concise summaries.',
-        { maxTokens: 1000 }
-      );
+    const summaryResponse = await this._llmCaller!.generate(
+      summaryPrompt,
+      'You are a helpful assistant that creates concise summaries.',
+      { maxTokens: 1000 }
+    );
 
-      const summaryText = summaryResponse.content;
+    const summaryText = summaryResponse.content;
 
-      // Create summary in DAG
-      summaryStore.create(params.sessionId, currentLevel, summaryText, {
-        sourceMessageIds: toSummarize.map(m => m.id),
-        modelUsed: summaryResponse.model,
-      });
+    summaryStore.create(params.sessionId, currentLevel, summaryText, {
+      sourceMessageIds: toSummarize.map((m: any) => m.id),
+      modelUsed: summaryResponse.model,
+    });
 
-      // Mark messages as compacted
-      msgStore.markCompacted(toSummarize.map(m => m.id));
+    msgStore.markCompacted(toSummarize.map((m: any) => m.id));
 
-      // Calculate new token count
-      const newTokens = ctxStore.getTokenCount(params.sessionId);
+    const newTokens = ctxStore.getTokenCount(params.sessionId);
 
-      console.log(`[QuantumMemory] Compaction complete: ${toSummarize.length} messages → ${currentLevel} level summary`);
+    return {
+      ok: true,
+      compacted: true,
+      level: 'llm',
+      messagesCompacted: toSummarize.length,
+      tokenReduction: currentTokens - newTokens,
+      result: {
+        summary: summaryText,
+        tokensBefore: currentTokens,
+        tokensAfter: newTokens,
+      },
+    };
+  }
 
-      return {
-        ok: true,
-        compacted: true,
-        result: {
-          summary: summaryText,
-          tokensBefore: currentTokens,
-          tokensAfter: newTokens,
-          details: {
-            messagesCompacted: toSummarize.length,
-            summaryLevel: currentLevel,
-          },
-        },
-      };
-    } catch (error) {
-      console.error('[QuantumMemory] Compaction failed:', error);
-      return {
-        ok: false,
-        compacted: false,
-        reason: `compaction failed: ${error}`,
-      };
-    }
+  /**
+   * Level 2: Keyword-based compaction (no LLM needed)
+   * Phase 2.4: Fallback when LLM unavailable or failed
+   */
+  private keywordCompaction(
+    sessionId: string,
+    toSummarize: any[],
+    currentTokens: number,
+    summaryStore: SummaryStore,
+    msgStore: MessageStore
+  ): CompactResult {
+    const compactor = new KeywordCompactor(msgStore, summaryStore);
+    const result = compactor.compact(sessionId, toSummarize.map((m: any) => m.id));
+    
+    return {
+      ok: result.ok,
+      compacted: result.compacted,
+      summaryId: result.summaryId,
+      messagesCompacted: result.messagesCompacted,
+      tokenReduction: result.tokenReduction,
+      level: 'keyword',
+      reason: result.compacted ? undefined : 'Keyword compaction produced no reduction',
+      result: {
+        summary: result.summary,
+        tokensBefore: currentTokens,
+        tokensAfter: currentTokens - result.tokenReduction,
+      },
+    };
+  }
+
+  /**
+   * Level 3: Deterministic drop (guaranteed convergence)
+   * Phase 2.4: Final fallback when all else fails
+   */
+  private deterministicDrop(
+    sessionId: string,
+    currentTokens: number,
+    targetTokens: number,
+    summaryStore: SummaryStore,
+    msgStore: MessageStore
+  ): CompactResult {
+    const dropper = new DeterministicDropper(msgStore, summaryStore, this.freshTailCount);
+    const result = dropper.drop(sessionId, targetTokens);
+    
+    return {
+      ok: result.ok,
+      compacted: result.compacted,
+      summaryId: result.summaryId,
+      messagesCompacted: result.messagesCompacted,
+      tokenReduction: result.tokenReduction,
+      level: 'deterministic',
+      reason: result.reason,
+      result: {
+        tokensBefore: currentTokens,
+        tokensAfter: currentTokens - result.tokenReduction,
+      },
+    };
   }
 
   /**
@@ -696,18 +832,46 @@ ${content}`;
       this._injector = new AutoRecallInjector(
         this.getSearchEngine(),
         this.getEntityStore(),
-        this.getInjectStore()
+        this.getInjectStore(),
+        this.getLineageTraverser(),  // Phase 4: lineage-aware memory injection
+        this.maxRecallTokens
       );
     }
     return this._injector;
   }
 
+  private getLineageTraverser(): LineageTraverser {
+    if (!this._lineageTraverser) {
+      this._lineageTraverser = new LineageTraverser(
+        this.getSummaryStore(),
+        this.getMessageStore()
+      );
+    }
+    return this._lineageTraverser;
+  }
+
   private getDropper(): SmartDropper {
     if (!this._dropper) {
       // Pass LLMCaller for LLM-powered importance scoring; undefined falls back to keyword scoring
-      this._dropper = new SmartDropper(this.getDb(), this._llmCaller ?? undefined);
+      // Pass dropThreshold from config for consistent threshold
+      this._dropper = new SmartDropper(this.getDb(), this._llmCaller ?? undefined, this.dropThreshold);
     }
     return this._dropper;
+  }
+
+  /**
+   * Get Trimmer instance (lazy initialization)
+   * Used by llmCompaction() to trim messages before summarization
+   */
+  private getTrimmer(): Trimmer {
+    if (!this._trimmer) {
+      this._trimmer = new Trimmer({
+        stubThreshold: this.trimStubThreshold,
+        stripBase64: this.trimStripBase64,
+        stripThinkingBlocks: this.trimStripThinkingBlocks,
+      });
+    }
+    return this._trimmer;
   }
 
   private getContextStore(): ContextStore {
@@ -716,7 +880,8 @@ ${content}`;
         this.getMessageStore(),
         this.getSessionManager(),
         this.getSummaryStore(),
-        this.freshTailCount
+        this.freshTailCount,
+        this.contextWindow
       );
     }
     return this._ctxStore;
@@ -778,7 +943,8 @@ export function registerQuantumMemory(api: {
 }): QuantumContextEngine {
   console.log('[QuantumMemory] Registering context engine');
   
-  const engine = new QuantumContextEngine();
+  // Pass openclaw config so QuantumConfig can be resolved
+  const engine = new QuantumContextEngine(api);
   
   // Fire callback after engine is created
   params?.onEngineCreated?.(engine);

@@ -21,7 +21,7 @@ export default function quantumMemoryPlugin(api: OpenClawPluginApi): void {
   const engine = registerQuantumMemory(api);
 
   // Register QM tools as optional OpenClaw agent tools
-  // Tools: qm_search, qm_entities, qm_relations, qm_recall, qm_projects
+  // Tools: qm_search, qm_entities, qm_relations, qm_recall, qm_projects, qm_lineage
   // Users must add these to their agent's tools.allow list to use them.
   // See: https://docs.openclaw.ai/plugins/agent-tools#optional-tool-opt-in
   registerQmTools(api, {
@@ -32,6 +32,7 @@ export default function quantumMemoryPlugin(api: OpenClawPluginApi): void {
     memoryInjectStore: engine.memoryInjectStore,
     sessionStore: engine.sessionManager,
     projectManager: engine.projectManager,
+    lineageTraverser: engine.lineageTraverser,  // Phase 3.3/4: Wired from engine
   });
 
   console.log("[QuantumMemory] Context engine + tools registered");

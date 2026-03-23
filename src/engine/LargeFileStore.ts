@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { extractFileIds, summarizeWithLLM } from '../utils/large-files.js';
 import type { TextSummarizer } from '../utils/large-files.js';
+import { estimateTokens } from '../trim/types.js';
 
 export interface LargeFileRecord {
   id: string;
@@ -92,7 +93,7 @@ export class LargeFileStore {
           if (fileContent) {
             const result = await summarizeWithLLM(fileContent, meta.fileName, meta.mimeType, summarizer);
             summary = result;
-            tokenCount = Math.ceil(fileContent.length / 4); // rough estimate
+            tokenCount = estimateTokens(fileContent);
           }
         } catch (err) {
           console.warn(`[LargeFileStore] LLM summarization failed for ${fileId}:`, err);

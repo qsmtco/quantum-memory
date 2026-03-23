@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { estimateTokens } from '../trim/types.js';
 
 export interface Summary {
   id: string;
@@ -29,7 +30,7 @@ export class SummaryStore {
   } = {}): Summary {
     const id = `sum_${randomUUID().slice(0, 12)}`;
     const now = new Date().toISOString();
-    const tokenCount = Math.ceil(content.length / 4);
+    const tokenCount = estimateTokens(content);
     
     this.db.run(
       `INSERT INTO summaries (id, session_id, parent_summary_id, level, content, source_message_ids, token_count, created_at)
@@ -71,6 +72,19 @@ export class SummaryStore {
     
     if (!row) return undefined;
     return this.mapRowToSummary(row);
+  }
+
+  /**
+   * Get summaries that have a specific parent (direct children)
+   * Used by LineageTraverser for DAG traversal
+   */
+  getByParentId(parentId: string): Summary[] {
+    const rows = this.db.query(
+      `SELECT * FROM summaries WHERE parent_summary_id = ? ORDER BY created_at ASC`,
+      [parentId]
+    );
+    
+    return rows.map((row: any) => this.mapRowToSummary(row));
   }
 
   /**
@@ -151,10 +165,11 @@ export class SummaryStore {
 
   /**
    * Get messages that need summarization (not compacted, older than fresh tail)
+   * Includes role for Trimmer to determine trimming strategy
    */
-  getMessagesToSummarize(sessionId: string, freshTailCount: number, limit: number = 100): Array<{ id: string; content: string; tokenCount: number }> {
+  getMessagesToSummarize(sessionId: string, freshTailCount: number, limit: number = 100): Array<{ id: string; content: string; tokenCount: number; role: string }> {
     const rows = this.db.query(
-      `SELECT id, content, token_count FROM messages 
+      `SELECT id, content, token_count, role FROM messages 
        WHERE session_id = ? AND is_compacted = 0 
        ORDER BY created_at ASC 
        LIMIT ? OFFSET ?`,
@@ -165,6 +180,7 @@ export class SummaryStore {
       id: String(row.id),
       content: row.content,
       tokenCount: row.token_count,
+      role: row.role,
     }));
   }
 

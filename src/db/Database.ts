@@ -266,6 +266,136 @@ export class QuantumDatabase {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_summary_cache_hash ON summary_cache(content_hash)
     `);
+
+    // Summary cache indexes
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_summary_cache_hash ON summary_cache(content_hash)
+    `);
+
+    // FTS5 virtual table for full-text search (mirrors migrations/index.ts)
+    this.createFtsTable();
+  }
+
+  /**
+   * Create FTS5 virtual table and triggers
+   * Mirrors schema in migrations/index.ts
+   * Note: FTS5 may not be available on all SQLite builds
+   */
+  private createFtsTable(): void {
+    if (!this.db) return;
+    
+    try {
+      // FTS5 virtual table
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+          content,
+          content='messages',
+          content_rowid='rowid'
+        )
+      `);
+
+      // Insert trigger
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+          INSERT INTO messages_fts(rowid, content) VALUES (NEW.rowid, NEW.content);
+        END
+      `);
+
+      // Delete trigger
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', OLD.rowid, OLD.content);
+        END
+      `);
+
+      // Update trigger
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', OLD.rowid, OLD.content);
+          INSERT INTO messages_fts(rowid, content) VALUES (NEW.rowid, NEW.content);
+        END
+      `);
+    } catch (ftsError) {
+      console.warn('[QuantumMemory] FTS5 not available:', ftsError);
+    }
+  }
+
+  /**
+   * Check if FTS5 is available and the index is populated.
+   * Returns { available: bool, rowCount: number, error?: string }
+   */
+  isFtsReady(): { available: boolean; rowCount: number; error?: string } {
+    if (!this.db) return { available: false, rowCount: 0, error: 'Database not initialized' };
+    try {
+      const result = this.query<{c: number}>('SELECT COUNT(*) as c FROM messages_fts');
+      const rowCount = result[0]?.c ?? 0;
+      return { available: true, rowCount };
+    } catch (e: any) {
+      return { available: false, rowCount: 0, error: e.message };
+    }
+  }
+
+  /**
+   * Rebuild the FTS5 index from scratch.
+   * Removes and recreates the FTS5 table and triggers,
+   * then re-populates from all messages.
+   * Use this if the index drifts or was created after messages were inserted.
+   */
+  rebuildFtsIndex(): { success: boolean; rowsIndexed: number; error?: string } {
+    if (!this.db) return { success: false, rowsIndexed: 0, error: 'Database not initialized' };
+    try {
+      // Check FTS5 is available
+      const ready = this.isFtsReady();
+      if (!ready.available) {
+        return { success: false, rowsIndexed: 0, error: ready.error };
+      }
+
+      // Detach and recreate FTS5 table (preserve messages data)
+      this.db.exec(`DROP TABLE IF EXISTS messages_fts`);
+      this.db.exec(`
+        CREATE VIRTUAL TABLE messages_fts USING fts5(
+          content,
+          content='messages',
+          content_rowid='rowid'
+        )
+      `);
+
+      // Drop old triggers
+      this.db.exec(`DROP TRIGGER IF EXISTS messages_fts_insert`);
+      this.db.exec(`DROP TRIGGER IF EXISTS messages_fts_delete`);
+      this.db.exec(`DROP TRIGGER IF EXISTS messages_fts_update`);
+
+      // Recreate triggers
+      this.db.exec(`
+        CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+          INSERT INTO messages_fts(rowid, content) VALUES (NEW.rowid, NEW.content);
+        END
+      `);
+      this.db.exec(`
+        CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', OLD.rowid, OLD.content);
+        END
+      `);
+      this.db.exec(`
+        CREATE TRIGGER messages_fts_update AFTER UPDATE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', OLD.rowid, OLD.content);
+          INSERT INTO messages_fts(rowid, content) VALUES (NEW.rowid, NEW.content);
+        END
+      `);
+
+      // Populate FTS5 from existing messages
+      this.db.exec(`
+        INSERT INTO messages_fts(rowid, content)
+        SELECT rowid, content FROM messages WHERE content IS NOT NULL
+      `);
+
+      const count = this.query<{c: number}>('SELECT COUNT(*) as c FROM messages_fts');
+      const rowsIndexed = count[0]?.c ?? 0;
+      console.log(`[QuantumMemory] FTS5 index rebuilt: ${rowsIndexed} rows indexed`);
+      return { success: true, rowsIndexed };
+    } catch (e: any) {
+      return { success: false, rowsIndexed: 0, error: e.message };
+    }
   }
 
   /**

@@ -1,6 +1,7 @@
 import { MessageStore } from './MessageStore.js';
 import { SessionManager } from './SessionManager.js';
 import { SummaryStore } from '../dag/SummaryStore.js';
+import { QuantumConfig } from '../utils/config.js';
 
 export interface ContextItem {
   type: 'message' | 'summary';
@@ -28,7 +29,8 @@ export class ContextStore {
     private messageStore: MessageStore,
     private sessionManager: SessionManager,
     private summaryStore: SummaryStore,
-    private freshTailCount: number = 32
+    private freshTailCount: number = 32,
+    private contextWindow: number = 32000
   ) {}
 
   /**
@@ -120,9 +122,7 @@ export class ContextStore {
    */
   needsCompaction(sessionId: string, threshold: number = 0.75): boolean {
     const totalTokens = this.getTokenCount(sessionId);
-    // Assume 32K context window for now
-    const contextWindow = 32000;
-    return totalTokens > contextWindow * threshold;
+    return totalTokens > this.contextWindow * threshold;
   }
 
   /**

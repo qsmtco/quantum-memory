@@ -1,4 +1,8 @@
 import { randomUUID } from 'crypto';
+import { estimateTokens } from '../trim/types.js';
+
+// Re-export estimateTokens so existing importers don't break
+export { estimateTokens };
 
 export interface Message {
   id: string;
@@ -9,13 +13,6 @@ export interface Message {
   createdAt: string;
   importanceScore: number;
   isCompacted: boolean;
-}
-
-/**
- * Estimate token count (rough: ~4 chars per token)
- */
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
 }
 
 /**
@@ -123,6 +120,18 @@ export class MessageStore {
     }
     
     const rows = this.db.query(sql, params);
+    return rows.map((row: any) => this.mapRowToMessage(row));
+  }
+
+  /**
+   * Get messages by their IDs
+   * Used by KeywordCompactor and DeterministicDropper
+   */
+  getByIds(ids: string[]): Message[] {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(',');
+    const sql = `SELECT * FROM messages WHERE id IN (${placeholders})`;
+    const rows = this.db.query(sql, ids);
     return rows.map((row: any) => this.mapRowToMessage(row));
   }
 

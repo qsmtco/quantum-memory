@@ -18,9 +18,13 @@ export interface ImportanceScore {
  * keyword-based threshold filtering.
  */
 export class SmartDropper {
+  // Default importance threshold (0.0-1.0) — configurable via constructor
+  private readonly DEFAULT_DROP_THRESHOLD = 0.3;
+
   constructor(
     private db: any,
-    private llmCaller?: { generate: (prompt: string, system?: string, opts?: any) => Promise<{ content: string }> }
+    private llmCaller?: { generate: (prompt: string, system?: string, opts?: any) => Promise<{ content: string }> },
+    private dropThreshold: number = 0.3
   ) {}
 
   /**
@@ -103,9 +107,10 @@ Messages:\n${messageList}`;
    * Determine which messages to drop based on importance scores.
    * Messages below threshold are candidates for dropping.
    */
-  getMessagesToDrop(scores: Map<string, ImportanceScore>, threshold: number = 0.3): string[] {
+  getMessagesToDrop(scores: Map<string, ImportanceScore>, threshold?: number): string[] {
+    const effectiveThreshold = threshold ?? this.dropThreshold;
     return Array.from(scores.entries())
-      .filter(([, v]) => v.score < threshold)
+      .filter(([, v]) => v.score < effectiveThreshold)
       .map(([k]) => k);
   }
 
@@ -113,12 +118,13 @@ Messages:\n${messageList}`;
    * Analyze messages for potential dropping using stored importance_score.
    * Does NOT use LLM — uses DB column directly. For LLM scoring use scoreMessages().
    */
-  analyze(sessionId: string, threshold: number = 0.3): Array<{
+  analyze(sessionId: string, threshold?: number): Array<{
     messageId: string;
     content: string;
     importanceScore: number;
     reason: string;
   }> {
+    const effectiveThreshold = threshold ?? this.dropThreshold;
     const rows = this.db.query(
       `SELECT id, content, importance_score FROM messages
        WHERE session_id = ? AND is_compacted = 0`,
@@ -126,7 +132,7 @@ Messages:\n${messageList}`;
     );
 
     return rows
-      .filter((row: any) => row.importance_score < threshold)
+      .filter((row: any) => row.importance_score < effectiveThreshold)
       .map((row: any) => ({
         messageId: row.id,
         content: row.content,
@@ -139,12 +145,13 @@ Messages:\n${messageList}`;
    * Drop low-value messages.
    * Uses LLM scoring when available, keyword fallback otherwise.
    */
-  async drop(sessionId: string, threshold: number = 0.3, dryRun: boolean = false): Promise<{
+  async drop(sessionId: string, threshold?: number, dryRun: boolean = false): Promise<{
     dropped: number;
     records: DropRecord[];
   }> {
+    const effectiveThreshold = threshold ?? this.dropThreshold;
     const scores = await this.scoreMessages(sessionId);
-    const toDrop = this.getMessagesToDrop(scores, threshold);
+    const toDrop = this.getMessagesToDrop(scores, effectiveThreshold);
 
     if (toDrop.length === 0) {
       return { dropped: 0, records: [] };
@@ -165,7 +172,7 @@ Messages:\n${messageList}`;
     const avgScore = toDrop.length > 0
       ? toDrop.reduce((sum, id) => sum + (scores.get(id)?.score ?? 0.5), 0) / toDrop.length
       : 0.5;
-    const record = this.logDrop(sessionId, toDrop, `LLM avg score: ${avgScore.toFixed(2)}, below ${threshold}`);
+    const record = this.logDrop(sessionId, toDrop, `LLM avg score: ${avgScore.toFixed(2)}, below ${effectiveThreshold}`);
 
     return { dropped: toDrop.length, records: [record] };
   }
